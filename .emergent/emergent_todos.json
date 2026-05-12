@@ -1,0 +1,22 @@
+[
+  {
+    "content": "Phase 1: Setup backend with MongoDB + Jupiter proxy + Solana balance endpoints",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Port global CSS/fonts + shared layout (nav, ticker, themes)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Build all 11 page components",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Wire frontend routing + App.js",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: E2E testing with testing agent",
+    "status": "in_progress"
+  }
+]
