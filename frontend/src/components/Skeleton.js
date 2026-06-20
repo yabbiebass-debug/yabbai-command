@@ -17,7 +17,7 @@ export function SkeletonCard({ lines = 3 }) {
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <Skeleton height={20} width="60%" />
       {[...Array(lines)].map((_, i) => (
-        <Skeleton key={i} height={14} width={`${70 + i * 5}%`} />
+        <Skeleton key={`skeleton-line-${i}`} height={14} width={`${70 + i * 5}%`} />
       ))}
     </div>
   );

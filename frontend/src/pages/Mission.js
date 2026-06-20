@@ -59,7 +59,9 @@ export default function Mission() {
       const data = await res.json();
       setSavedMissions(Array.isArray(data) ? data : []);
       setDeployCount(Array.isArray(data) ? data.length : 0);
-    } catch {}
+    } catch (e) {
+      console.error('Failed to fetch missions:', e);
+    }
     setLoadingMissions(false);
   }, []);
 

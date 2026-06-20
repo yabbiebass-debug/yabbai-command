@@ -46,6 +46,7 @@ export default function Layout() {
 
   useEffect(() => {
     if (mobileOpen) setMobileOpen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
   const doubled = [...TICKER_ITEMS, ...TICKER_ITEMS];
@@ -58,7 +59,7 @@ export default function Layout() {
       {/* Floating yabbies */}
       {[...Array(5)].map((_, i) => (
         <span
-          key={i}
+          key={`yabby-${i}`}
           className="yabby-floater"
           style={{
             left: `${10 + i * 20}%`,
@@ -75,7 +76,7 @@ export default function Layout() {
       <div className="ticker-wrap">
         <div className="ticker-content">
           {doubled.map((item, i) => (
-            <span key={i} className="ticker-segment">
+            <span key={`ticker-${item.label}-${i}`} className="ticker-segment">
               <span className="ticker-item">{item.label}</span>
               <span className={`ticker-item ${item.color}`}>{item.value}</span>
               <span className="ticker-sep">◆</span>

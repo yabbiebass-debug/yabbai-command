@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Legend,
@@ -49,7 +49,7 @@ export default function Analytics() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('overview');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const [metricsR, txR, missionsR, mintR] = await Promise.all([
         fetch(`${API}/analytics`).then(r => r.json()),
@@ -76,11 +76,13 @@ export default function Analytics() {
           setTreasuryHistory(tsData.map((s, i) => ({ ts: formatTs(s.ts), balance: s.balance_sol, usd: (s.balance_sol * SOL_USD).toFixed(2), i })));
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('Failed to load analytics data:', e);
+    }
     setLoading(false);
-  };
+  }, [API]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   // Build transaction volume by day
   const txByDay = React.useMemo(() => {
@@ -194,7 +196,7 @@ export default function Analytics() {
                   <ResponsiveContainer width="100%" height={200}>
                     <PieChart>
                       <Pie data={missionPie} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value">
-                        {missionPie.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                        {missionPie.map((entry, i) => <Cell key={`cell-${entry.name}-${i}`} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                       </Pie>
                       <Legend wrapperStyle={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070' }} />
                       <Tooltip content={<CustomTip />} />

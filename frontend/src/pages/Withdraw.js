@@ -34,7 +34,9 @@ export default function Withdraw() {
       const res = await fetch(`${API}/solana-balance?owner=${addr}`);
       const data = await res.json();
       if (data.ok) setWalletBal(data.sol);
-    } catch {}
+    } catch (e) {
+      console.error('Failed to fetch wallet balance:', e);
+    }
     setBalLoading(false);
   }, []);
 

@@ -1,10 +1,6 @@
 [
   {
-    "content": "Call testing_agent_v3 for comprehensive end-to-end regression testing",
-    "status": "completed"
-  },
-  {
-    "content": "Fix all bugs reported by testing agent (high to low priority)",
+    "content": "Run testing agent to verify fixes don't break functionality",
     "status": "completed"
   }
 ]

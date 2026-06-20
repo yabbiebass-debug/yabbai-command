@@ -185,7 +185,8 @@ export default function CommandCentre() {
           setStats(prev => ({ ...prev, txs: data.tx_count }));
         }
       } catch (e) {
-        // Silently continue with simulated data
+        console.error('Failed to load analytics:', e);
+        // Continue with simulated data
       }
     };
     loadBackend();

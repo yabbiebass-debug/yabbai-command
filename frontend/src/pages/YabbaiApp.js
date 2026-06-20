@@ -102,8 +102,8 @@ export default function YabbaiApp() {
         return r.json();
       })
       .then(d => { if (d.configured) { setMintCfg(d); mintRef.current = d.mint; } })
-      .catch(() => {});
-  }, [toastError]);
+      .catch((e) => console.error('Failed to load token mint:', e));
+  }, [API, toastError]);
 
   useEffect(() => {
     if (!mintRef.current) return;
@@ -117,12 +117,12 @@ export default function YabbaiApp() {
           return r.json();
         })
         .then(d => { if (d.ok && d.price) setPrice(d.price); })
-        .catch(() => {});
+        .catch((e) => console.error('Price fetch failed:', e));
     };
     poll();
     const id = setInterval(poll, 15000);
     return () => clearInterval(id);
-  }, [mintCfg, toastError]);
+  }, [mintCfg, API, toastError]);
 
   useEffect(() => {
     const tick = setInterval(() => {

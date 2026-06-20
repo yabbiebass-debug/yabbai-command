@@ -64,8 +64,11 @@ export default function Settings() {
     fetch(`${API}/settings`)
       .then(r => r.json())
       .then(d => { setCfg(prev => ({ ...prev, ...d })); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
+      .catch((e) => {
+        console.error('Failed to load settings:', e);
+        setLoading(false);
+      });
+  }, [API]);
 
   const set = (key, val) => { setCfg(prev => ({ ...prev, [key]: val })); setDirty(true); };
 
