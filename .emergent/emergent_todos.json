@@ -1,18 +1,10 @@
 [
   {
-    "content": "Run frontend linting (esbuild) to catch syntax errors",
+    "content": "Call testing_agent_v3 for comprehensive end-to-end regression testing",
     "status": "completed"
   },
   {
-    "content": "Check service logs and take screenshots to verify new pages",
-    "status": "in_progress"
-  },
-  {
-    "content": "Call testing_agent_v3 for comprehensive end-to-end regression testing",
-    "status": "pending"
-  },
-  {
     "content": "Fix all bugs reported by testing agent (high to low priority)",
-    "status": "pending"
+    "status": "completed"
   }
 ]
