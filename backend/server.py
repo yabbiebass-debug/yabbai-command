@@ -27,10 +27,22 @@ revenue_system = RevenueSystem(db_mongo)
 
 # Import after revenue_system is created
 from revenue.live_tracker import LiveTracker
+from revenue.agents import AgentPool
+
 live_tracker = LiveTracker(db_mongo, revenue_system)
 
-# Background task reference
+# Initialize Multi-Agent System
+agent_pool = AgentPool(
+    db=db_mongo,
+    revenue_system=revenue_system,
+    min_agents_per_phase=1,
+    max_agents_per_phase=15,
+    target_agents_per_phase=10,
+)
+
+# Background task references
 background_task = None
+agent_pool_task = None
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -620,6 +632,29 @@ async def revenue_webhook_invoice_paid(request: Request):
         logger.error(f"Revenue invoice paid webhook error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@api_router.post("/revenue/webhooks/sweep-attempted")
+async def revenue_webhook_sweep_attempted(request: Request):
+    """Track sweep attempt (for audit trail)."""
+    try:
+        data = await request.json()
+        
+        # Log sweep attempt
+        await db.revenue_sweeps.insert_one({
+            "from": data.get("from"),
+            "to": data.get("to"),
+            "token": data.get("token"),
+            "amount": data.get("amount"),
+            "status": "attempted",
+            "timestamp": datetime.now(timezone.utc),
+        })
+        
+        logger.info(f"💰 Sweep attempted: {data.get('amount')} {data.get('token')} → {data.get('to')}")
+        
+        return {"ok": True, "tracked": True}
+    except Exception as e:
+        logger.error(f"Sweep tracking error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ── Live Tracking Endpoints ────────────────────────────────────────────────
 
 @api_router.get("/revenue/live/status")
@@ -728,6 +763,87 @@ async def revenue_live_websocket(websocket: WebSocket):
         live_tracker.unsubscribe(websocket)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# MULTI-AGENT SYSTEM ROUTES
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_router.get("/agents/status")
+async def agents_status():
+    """Get multi-agent pool status."""
+    try:
+        status = agent_pool.get_status()
+        return JSONResponse(content=status)
+    except Exception as e:
+        logger.error(f"Agents status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/agents/start")
+async def agents_start(authorization: Optional[str] = Header(None)):
+    """Start the agent pool (admin only)."""
+    verify_revenue_admin(authorization)
+    try:
+        if not agent_pool.running:
+            asyncio.create_task(agent_pool.start())
+            return {"ok": True, "status": "started"}
+        return {"ok": True, "status": "already_running"}
+    except Exception as e:
+        logger.error(f"Agents start error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/agents/stop")
+async def agents_stop(authorization: Optional[str] = Header(None)):
+    """Stop the agent pool (admin only)."""
+    verify_revenue_admin(authorization)
+    try:
+        await agent_pool.stop()
+        return {"ok": True, "status": "stopped"}
+    except Exception as e:
+        logger.error(f"Agents stop error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/agents/spawn/{phase}")
+async def agents_spawn_phase(
+    phase: str,
+    authorization: Optional[str] = Header(None)
+):
+    """Spawn additional agent for a specific phase (admin only)."""
+    verify_revenue_admin(authorization)
+    try:
+        from revenue.agents import Phase
+        phase_enum = Phase(phase.lower())
+        agent_id = await agent_pool.spawn_agent(phase_enum)
+        
+        if agent_id:
+            return {"ok": True, "agent_id": agent_id, "phase": phase}
+        else:
+            return {"ok": False, "error": "Max agents reached for phase"}
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid phase: {phase}")
+    except Exception as e:
+        logger.error(f"Agents spawn error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/agents/phase/{phase}")
+async def agents_phase_status(phase: str):
+    """Get status for a specific phase."""
+    try:
+        from revenue.agents import Phase
+        phase_enum = Phase(phase.lower())
+        
+        status = agent_pool.get_status()
+        phase_data = status["phase_breakdown"].get(phase.lower(), {})
+        
+        return JSONResponse(content={
+            "phase": phase,
+            "data": phase_data,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid phase: {phase}")
+    except Exception as e:
+        logger.error(f"Phase status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 @api_router.get("/")
 async def root():
@@ -745,24 +861,35 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_revenue_tracker():
-    """Start the live revenue tracking on startup."""
-    global background_task
+    """Start the live revenue tracking and agent pool on startup."""
+    global background_task, agent_pool_task
     try:
         # Start background orchestrator
         background_task = asyncio.create_task(live_tracker.start_background_orchestrator())
         logger.info("✅ Live Revenue Tracker started")
+
+        # Start multi-agent pool
+        agent_pool_task = asyncio.create_task(agent_pool.start())
+        logger.info("✅ Multi-Agent Pool started")
+
     except Exception as e:
-        logger.error(f"Failed to start live tracker: {e}")
+        logger.error(f"Failed to start systems: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    """Shutdown database and stop live tracker."""
-    global background_task
+    """Shutdown database and stop all systems."""
+    global background_task, agent_pool_task
     try:
         await live_tracker.stop_background_orchestrator()
         if background_task:
             background_task.cancel()
         logger.info("⏸️  Live Revenue Tracker stopped")
+
+        await agent_pool.stop()
+        if agent_pool_task:
+            agent_pool_task.cancel()
+        logger.info("⏸️  Multi-Agent Pool stopped")
+
     except Exception as e:
-        logger.error(f"Error stopping live tracker: {e}")
+        logger.error(f"Error stopping systems: {e}")
     client.close()
