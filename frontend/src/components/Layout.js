@@ -13,6 +13,8 @@ const NAV_LINKS = [
   { to: '/basham', label: 'BASHAM' },
   { to: '/side-hustle', label: 'Side Hustle' },
   { to: '/promo', label: 'Promo' },
+  { to: '/settings', label: 'Settings' },
+  { to: '/analytics', label: 'Analytics' },
 ];
 
 const TICKER_ITEMS = [

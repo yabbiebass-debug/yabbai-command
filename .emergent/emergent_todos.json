@@ -1,22 +1,18 @@
 [
   {
-    "content": "Phase 1: Setup backend with MongoDB + Jupiter proxy + Solana balance endpoints",
+    "content": "Run frontend linting (esbuild) to catch syntax errors",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Port global CSS/fonts + shared layout (nav, ticker, themes)",
-    "status": "completed"
+    "content": "Check service logs and take screenshots to verify new pages",
+    "status": "in_progress"
   },
   {
-    "content": "Phase 2: Build all 11 page components",
-    "status": "completed"
+    "content": "Call testing_agent_v3 for comprehensive end-to-end regression testing",
+    "status": "pending"
   },
   {
-    "content": "Phase 2: Wire frontend routing + App.js",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 2: E2E testing with testing agent",
-    "status": "completed"
+    "content": "Fix all bugs reported by testing agent (high to low priority)",
+    "status": "pending"
   }
 ]

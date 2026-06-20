@@ -1,19 +1,46 @@
-# plan.md — YABBAI (FARM stack port)
+# plan.md — YABBAI (FARM stack) — Scale-up Roadmap (Updated)
 
 ## 1) Objectives
 - ✅ Port the provided reference UI/UX to FARM: **FastAPI + React + MongoDB**.
-- ✅ Deliver **11 routes** with the same simulated “live” feel (interval ticks, waveforms, event streams) and dual themes (**YABBAI** vs **BASHAM**).
-- ✅ Implement backend APIs:
-  - `token-mint` (CRUD, persisted in MongoDB)
-  - `jupiter-price` (proxy price lookup)
-  - `solana-balance` (proxy on-chain balances)
+- ✅ Deliver **11 core routes** with the same simulated “live” feel (interval ticks, waveforms, event streams) and dual themes (**YABBAI** vs **BASHAM**).
 - ✅ Preserve key visual system: ultra-dark (#060E20), Solana Purple/Green, amber, glass/scanlines/neon, fonts, animations.
 - ✅ Ensure deployment-ready app preview is working end-to-end.
+- ✅ Add **fund recovery / treasury sweep UX**:
+  - Withdraw tab upgraded to “Treasury Sweep” (connect → set destination → % presets/MAX SAFE → sweep)
+  - Wallet tab upgraded with “Quick Sweep” widget
+
+**Scale-up objectives (Phase 3+4)**
+- ✅ Add persistent, DB-backed platform features (settings, missions, transactions, telemetry):
+  - Settings CRUD (site + treasury config)
+  - Mission persistence (save/load/delete)
+  - Transaction persistence (save sweeps + other ops)
+  - Price history + treasury snapshots for analytics
+- ✅ Add **rate limiting + caching** foundations to protect/provide fast API proxying (SlowAPI + TTL caches).
+- ✅ Add new pages and UX utilities:
+  - `/settings` (owner controls / config)
+  - `/analytics` (charts + telemetry)
+  - Toast notifications (global)
+  - CopyButton
+  - Skeleton loading components
+- ⏭️ Finish **frontend wiring + hardening**:
+  - Wire `/settings` + `/analytics` routes and navigation
+  - Wrap app with `ToastProvider`
+  - Upgrade **Command Centre** and **Token App** to load live stats/config from backend
+  - Add **429 rate limit** handling (toasts + retry guidance)
+  - Run full E2E regression tests for Phase 3+4
 
 **Current status**
 - App is live: https://yabbai-command.preview.emergentagent.com
-- Phase 1 + Phase 2 completed.
-- E2E testing completed with **100% pass rate** (backend + frontend).
+- ✅ Phase 1 + Phase 2 completed (MVP fully tested).
+- ✅ Withdraw + Wallet updated for **sweep/recovery** flows.
+- ✅ Backend has been upgraded for Phase 3+4:
+  - MongoDB endpoints added for `settings`, `missions`, `transactions`, `treasury snapshots`, `price history`, and `sweep` logging.
+  - SlowAPI rate limiting + in-memory caching scaffolding exists.
+- ✅ Frontend Phase 3+4 files created:
+  - `ToastContext.js`, `CopyButton.js`, `Skeleton.js`
+  - New pages: `Settings.js`, `Analytics.js`
+  - `Mission.js` and `Promo.js` upgraded to use backend APIs
+- 🚧 Remaining: new pages are not yet routed; `CommandCentre.js` + `YabbaiApp.js` still rely primarily on simulated state; rate-limit (429) UX not yet standardized.
 
 ---
 
@@ -50,115 +77,172 @@
   - `GET/POST/DELETE /api/token-mint`
   - `GET /api/jupiter-price`
   - `GET /api/solana-balance`
-- ✅ Environment options supported:
-  - `MONGO_URL`, `DB_NAME`, `CORS_ORIGINS`
-  - optional `SOLANA_RPC_URL` (defaults to `https://api.mainnet-beta.solana.com`)
 
 **Frontend (ported pages + design system)**
-- ✅ Global CSS in `src/index.css`:
-  - variables, themes, scanlines, neural bg, glass cards, buttons, badges
-  - animations: fade-ins, live-dot pulse, ticker
-  - BASHAM theme overrides
-- ✅ Google Fonts included in `public/index.html` (Unbounded, Syne, JetBrains Mono, DM Mono, Manrope, Bebas Neue).
-- ✅ Shared layout:
-  - sticky nav + mobile menu
-  - ticker tape
-  - theme switching based on route (`/basham`, `/side-hustle` → BASHAM)
+- ✅ Global CSS in `src/index.css`.
+- ✅ Fonts added to `public/index.html`.
+- ✅ Shared layout: sticky nav, mobile menu, ticker tape, theme switching.
 
-**Solana client support (Withdraw page)**
-- ✅ Added CRA-friendly polyfills and CRACO webpack fallbacks for `@solana/web3.js`.
-- ✅ Client-signed SOL transfer flow implemented (Phantom required; non-Phantom shows instruction).
+**Solana client support**
+- ✅ CRA/CRACO polyfills and fallbacks for `@solana/web3.js`.
 
 **Pages (11 routes) — all implemented**
-1. ✅ `/` Command Centre: phases, stats, waveform canvas, events stream, quick actions.
-2. ✅ `/yabbai` Token App: OHLCV canvas chart, swap panel, mission phase progress, “Sweep All Yields”.
-3. ✅ `/launch` Launch sequence: launchpad selection + mint registration persisted to Mongo.
-4. ✅ `/payment` Payment Engine: 12 rails, PayPal autopayout simulation, real vs mock ledger filter.
-5. ✅ `/mission` Mission Builder: value locks, sliders, mission plan typewriter generator.
-6. ✅ `/wallet` Wallet connect: Phantom connect prompt when available; address lookup and backend balance fetch with demo fallback.
-7. ✅ `/withdraw` Withdraw Portal: Phantom-sign transaction UX + treasury balance display.
-8. ✅ `/api-pulse` API Pulse: 20 API cards + waveform + cascade mode.
-9. ✅ `/basham` Gold Harvester: audit form, wealth map generator (typewriter), colony list.
-10. ✅ `/side-hustle` Side Hustle Protocol: signal feed, scripts tab, add lead form.
-11. ✅ `/promo` Promo generator: canvas preview, template/theme controls, generation history.
+1. ✅ `/` Command Centre
+2. ✅ `/yabbai` Token App
+3. ✅ `/launch` Launch sequence
+4. ✅ `/payment` Payment Engine
+5. ✅ `/mission` Mission Builder
+6. ✅ `/wallet` Wallet
+7. ✅ `/withdraw` Withdraw / Sweep portal
+8. ✅ `/api-pulse` API Pulse
+9. ✅ `/basham` Gold Harvester
+10. ✅ `/side-hustle` Side Hustle Protocol
+11. ✅ `/promo` Promo generator
 
-**Data strategy**
-- ✅ Simulations in local state + `setInterval`.
-- ✅ “Live mode” toggles automatically when `/api/token-mint` returns `configured:true`.
+**Post-V1 upgrades already applied**
+- ✅ Withdraw tab refactored into **Treasury Sweep / Fund Recovery** flow:
+  - live connected-wallet balance via backend RPC
+  - % presets + MAX SAFE (fee buffer)
+  - sweep confirmation state + session history
+- ✅ Wallet tab includes **Quick Sweep** widget (destination + % presets + on-chain send).
 
 **Phase 2 testing (end-to-end)**
 - ✅ Full navigation and key interactions validated across all pages.
 - ✅ Backend endpoints validated including input validation and graceful error handling.
-- ✅ Test report generated under `/app/test_reports/iteration_1.json`.
 
 ---
 
-### Phase 3 — Hardening + Production polish (NEXT)
-Goal: reduce warnings, improve resilience/performance, and tighten UX edge cases.
+### Phase 3 — Hardening + Production polish (IN PROGRESS)
+Goal: reduce warnings, improve resilience/performance, and tighten UX edge cases while preparing for DB-backed features.
 
 **Engineering hardening**
-- [ ] Tighten React hook dependencies (e.g., `Layout.js` exhaustive-deps warning) while preserving behavior.
-- [ ] Reduce CRA build warnings where possible (e.g., source-map warnings from dependencies are non-critical, but can be suppressed if desired).
-- [ ] Add optional lightweight caching/throttling:
-  - cache Jupiter price for N seconds per mint
-  - throttle Solana balance calls per address
-- [ ] Add global error boundaries and standardized toast/inline error components.
+- ✅ Added global toast notification system (`ToastContext.js`) (not yet wired into router).
+- ✅ Added UI utilities: `CopyButton`, `Skeleton`.
+- [ ] Wire `ToastProvider` into `App.js` so all pages can show consistent error UX.
+- [ ] Introduce standardized API error handling via a small `apiClient` wrapper (recommended) or consistent inline fetch handling.
+- [ ] Prioritize error UX **now**:
+  - show toasts for 429 Too Many Requests (rate limiting)
+  - show toasts for network failures/timeouts
+  - suggest retry after short delay or switch RPC if configured
 
 **Performance**
-- [ ] Ensure every `setInterval` is cleared on unmount (already done in most pages; re-audit).
-- [ ] Optimize canvas redraw loops (cap FPS / pause when tab hidden).
+- [ ] Re-audit all `setInterval` and RAF loops; ensure teardown on unmount.
+- [ ] Pause/reduce animation work on hidden tab (`document.visibilityState`).
 
 **Security / MVP hygiene**
-- [ ] Improve server-side base58 validation for `owner` (balance) in addition to `mint`.
-- [ ] Add rate limiting / basic abuse protection (optional) for proxy endpoints.
-- [ ] Make CORS origin list environment-driven for production deployments.
+- ✅ Strengthened server-side validation patterns (base58 helper present; ensure used consistently).
+- ✅ SlowAPI rate limiting added to backend.
+- [ ] Make CORS origin list environment-driven for production.
 
 **UX polish**
-- [ ] Add small “demo vs live” badges and clearer copy when Phantom is not installed.
-- [ ] Add “copy address” utilities for treasury/mint addresses.
-- [ ] Add loading skeletons for wallet + withdraw balance fetches.
-
-**User stories (Phase 3)**
-1. As a user, I get a friendly error if Jupiter/Solana RPC is unavailable.
-2. As a user, pages remain smooth (no runaway intervals) after navigation.
-3. As a user, I can refresh token mint state and see immediate UI changes.
-4. As a developer, I can add new API cards/rails with one-line config edits.
-5. As a user, I see consistent visuals/spacing across all pages and breakpoints.
+- ✅ CopyButton utility component (mint, treasury, addresses, tx sigs).
+- ✅ Skeleton/loading components exist.
+- [ ] Apply skeletons + toasts to key fetches (wallet balance, sweeps, analytics loads).
 
 **Phase 3 testing**
-- [ ] Regression pass on all 11 routes.
-- [ ] Basic performance check (no memory leaks from intervals/raf loops).
+- [ ] Re-run E2E regression across all routes after wiring.
+- [ ] Add targeted tests for sweep UX edge cases (MAX SAFE, invalid destination, insufficient funds, 429 handling).
 
 ---
 
-### Phase 4 — Optional extensions (only after approval)
-- [ ] Auth (admin-only mint registration / withdrawal owner mode) if required.
-- [ ] Caching layer for Jupiter price + balance (server-side) with TTL.
-- [ ] Persist additional settings (theme defaults, mission presets).
-- [ ] Export promo frames/settings (download PNG from canvas, store presets).
+### Phase 4 — Scale-up: Data model + persistence + analytics (IN PROGRESS)
+Goal: evolve from a “premium simulated command centre” to a **telemetry-driven, persistent platform**.
 
-**User stories (Phase 4)**
-1. As an admin, I can protect mint registration behind login.
-2. As an admin, I can audit config changes with timestamps.
-3. As a user, I see faster price loads via caching.
-4. As a user, I can save mission presets and reload them.
-5. As a user, I can export promo frames/settings.
+#### 4.1 Backend: New collections + CRUD ✅ COMPLETE
+Mongo-backed collections and APIs now exist for:
+- ✅ **Settings**: `GET/POST /api/settings`
+- ✅ **Missions**: `GET/POST/PUT/DELETE /api/missions`
+- ✅ **Transactions**: `GET/POST /api/transactions`
+- ✅ **Price History**: `GET /api/price-history?mint=...&limit=...`
+- ✅ **Treasury Snapshots**: `GET /api/treasury-snapshots?limit=...`
+- ✅ **Sweep**: `POST /api/sweep` to log sweep operations
+- ✅ **Analytics summary**: `GET /api/analytics` (used by Analytics page)
+
+#### 4.2 Backend: Rate limiting + caching ✅ COMPLETE (Foundations)
+- ✅ SlowAPI limits enabled (verify per-endpoint configuration during testing).
+- ✅ In-memory caching (TTL) implemented for hot endpoints:
+  - price cache per mint (TTL ~30s)
+  - balance cache per owner (TTL ~15s)
+
+#### 4.3 Frontend: New pages ✅ CREATED (wiring pending)
+- ✅ **`/settings`** page created:
+  - configure treasury/main wallet, fee buffer, slippage, AI defaults, demo mode
+- ✅ **`/analytics`** page created (Recharts):
+  - treasury balance chart
+  - transaction volume chart
+  - mission status chart
+  - transaction table
+
+#### 4.4 Frontend: Upgrades to existing pages (IN PROGRESS)
+- ✅ **Mission Builder** updated to use backend APIs.
+- ✅ **Promo** updated to use backend APIs.
+- [ ] **Command Centre (/)**: replace simulated headline stats with backend-driven telemetry where available:
+  - treasury snapshots + latest treasury SOL
+  - mission counts
+  - transaction counts
+  - optionally price history latest price
+- [ ] **YabbaiApp (/yabbai)**:
+  - load/save token configuration via backend
+  - optionally poll backend price and trigger snapshot writes when configured
+- [ ] **Withdraw + Wallet**:
+  - ensure sweep actions POST `/api/sweep` and also record in `/api/transactions` (if not already)
+  - surface persisted transaction history (not only session)
+
+#### 4.5 Shared UX utilities (IN PROGRESS)
+- ✅ Toast system implemented.
+- ✅ CopyButton implemented.
+- ✅ Skeleton components implemented.
+- [ ] Add a shared `apiClient` wrapper to normalize errors and prioritize **429** handling across the app:
+  - detect `res.status === 429`
+  - toast a clear “Rate limited—try again shortly” message
+  - optionally read `Retry-After` header if present
+
+**Phase 4 testing**
+- [ ] API validation checks (manual + automated): settings save/load, missions CRUD, sweep logging, analytics summary.
+- [ ] Frontend E2E: settings save, analytics rendering, mission persistence, sweep persistence.
 
 ---
 
 ## 3) Next Actions
-1. Phase 3: address remaining lint warning(s) and optional build warning suppression.
-2. Add optional caching/throttling for `jupiter-price` + `solana-balance`.
-3. Add global error boundary + shared notification pattern.
-4. Re-run E2E regression after hardening changes.
+**P0 — Wire the new Phase 3+4 frontend (immediate)**
+1. Update `App.js`:
+   - wrap app with `<ToastProvider>`
+   - add routes: `/settings`, `/analytics`
+2. Update `Layout.js`:
+   - add nav links for Settings + Analytics
+
+**P0 — Error UX + rate limit handling (prioritized now)**
+3. Implement standardized fetch handling:
+   - toast on non-OK responses
+   - special-case 429 with a clear retry message
+
+**P0 — Backend integration for core pages**
+4. Upgrade `CommandCentre.js` to fetch live stats from backend endpoints.
+5. Upgrade `YabbaiApp.js` to fetch/save settings/mint config from backend endpoints.
+
+**P0 — Testing**
+6. Run comprehensive E2E regression (`testing_agent_v3`) after wiring is complete.
+7. Fix any regressions (routing, missing env vars, API shape mismatches, chart rendering errors).
+
+**P1 — Additional hardening**
+8. Add error boundary.
+9. Reduce animation load on hidden tabs.
+10. Make CORS origin list environment-driven.
+
+---
 
 ## 4) Success Criteria
-- ✅ All 11 routes render with correct theme + animations.
-- ✅ Mint config persists in Mongo and reliably toggles live mode.
-- ✅ `jupiter-price` and `solana-balance` return stable JSON and handle invalid inputs.
-- ✅ Withdraw page supports Phantom signing flow when available with clear status steps.
-- ✅ E2E regression run passes (currently **100%**).
-- Phase 3 completion target:
+- ✅ All current routes render with correct theme + animations.
+- ✅ Sweep/Fund recovery works: connected wallet → destination → presets/MAX SAFE → confirmed tx.
+- Phase 3 complete when:
   - no critical console errors
-  - reduced lint warnings
-  - improved resilience under network/RPC failures
+  - hook warnings addressed
+  - global toasts integrated (ToastProvider wired)
+  - 429 rate limiting errors are displayed clearly and consistently
+- Phase 4 complete when:
+  - settings, missions, transactions persist to MongoDB
+  - sweeps are stored and displayed as history
+  - price + treasury snapshots populate analytics
+  - `/settings` and `/analytics` are fully accessible via routes + nav
+  - Command Centre + Token App are backend-driven where applicable
+  - E2E regression passes for Phase 3+4

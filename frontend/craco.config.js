@@ -37,14 +37,15 @@ let webpackConfig = {
       '@': path.resolve(__dirname, 'src'),
     },
     configure: (webpackConfig) => {
-      // Polyfills for @solana/web3.js
+      // Polyfills for @solana/web3.js and other ESM dependencies
       webpackConfig.resolve = webpackConfig.resolve || {};
       webpackConfig.resolve.fallback = {
         ...(webpackConfig.resolve.fallback || {}),
         crypto: require.resolve('crypto-browserify'),
         stream: require.resolve('stream-browserify'),
         buffer: require.resolve('buffer/'),
-        process: require.resolve('process/browser'),
+        process: require.resolve('process/browser.js'),
+        'process/browser': require.resolve('process/browser.js'),
         vm: false,
         path: false,
         fs: false,
@@ -62,7 +63,7 @@ let webpackConfig = {
       webpackConfig.plugins.push(
         new webpack.ProvidePlugin({
           Buffer: ['buffer', 'Buffer'],
-          process: 'process/browser',
+          process: 'process/browser.js',
         })
       );
 

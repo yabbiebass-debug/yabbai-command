@@ -1,0 +1,365 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  AreaChart, Area, LineChart, Line, BarChart, Bar,
+  XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Legend,
+} from 'recharts';
+import CopyButton from '../components/CopyButton';
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
+
+const SOL_USD = 178.42;
+
+function formatTs(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+const CustomTip = ({ active, payload, label, unit = '' }) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{ background: 'rgba(6,14,32,0.97)', border: '1px solid rgba(153,69,255,0.25)', borderRadius: 6, padding: '8px 12px' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#9945FF', marginBottom: 4 }}>{label}</div>
+      {payload.map((p, i) => (
+        <div key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: p.color }}>
+          {p.name}: {p.value}{unit}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+function EmptyChart({ height = 180 }) {
+  return (
+    <div style={{ height, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#3a5070' }}>No data yet</div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#2a4060' }}>Data will populate as you use the platform</div>
+    </div>
+  );
+}
+
+export default function Analytics() {
+  const [metrics, setMetrics] = useState(null);
+  const [priceHistory, setPriceHistory] = useState([]);
+  const [treasuryHistory, setTreasuryHistory] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [missions, setMissions] = useState([]);
+  const [mintCfg, setMintCfg] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('overview');
+
+  const load = async () => {
+    try {
+      const [metricsR, txR, missionsR, mintR] = await Promise.all([
+        fetch(`${API}/analytics`).then(r => r.json()),
+        fetch(`${API}/transactions?limit=100`).then(r => r.json()),
+        fetch(`${API}/missions`).then(r => r.json()),
+        fetch(`${API}/token-mint`).then(r => r.json()),
+      ]);
+      setMetrics(metricsR);
+      setTransactions(Array.isArray(txR) ? txR : []);
+      setMissions(Array.isArray(missionsR) ? missionsR : []);
+      if (mintR.configured) {
+        setMintCfg(mintR);
+        const phR = await fetch(`${API}/price-history?mint=${mintR.mint}&limit=200`);
+        const phData = await phR.json();
+        if (phData.ok) setPriceHistory(phData.points.map((p, i) => ({ ts: formatTs(p.ts), price: p.price, i })));
+        const tsR = await fetch(`${API}/treasury-snapshots?limit=200`);
+        const tsData = await tsR.json();
+        if (Array.isArray(tsData)) setTreasuryHistory(tsData.map((s, i) => ({ ts: formatTs(s.ts), balance: s.balance_sol, usd: (s.balance_sol * SOL_USD).toFixed(2), i })));
+      } else {
+        // Fallback: generate demo treasury snapshots for visual
+        const tsR = await fetch(`${API}/treasury-snapshots?limit=200`);
+        const tsData = await tsR.json();
+        if (Array.isArray(tsData) && tsData.length > 0) {
+          setTreasuryHistory(tsData.map((s, i) => ({ ts: formatTs(s.ts), balance: s.balance_sol, usd: (s.balance_sol * SOL_USD).toFixed(2), i })));
+        }
+      }
+    } catch (e) {}
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  // Build transaction volume by day
+  const txByDay = React.useMemo(() => {
+    const map = {};
+    transactions.forEach(t => {
+      const d = new Date(t.created_at);
+      const key = `${d.getMonth()+1}/${d.getDate()}`;
+      map[key] = (map[key] || 0) + (t.amount_sol || 0);
+    });
+    return Object.entries(map).slice(-14).map(([k, v]) => ({ day: k, volume: parseFloat(v.toFixed(4)) }));
+  }, [transactions]);
+
+  // Mission status breakdown
+  const missionPie = React.useMemo(() => {
+    const status = {};
+    missions.forEach(m => { status[m.status || 'active'] = (status[m.status || 'active'] || 0) + 1; });
+    return Object.entries(status).map(([name, value]) => ({ name, value }));
+  }, [missions]);
+
+  const PIE_COLORS = ['#9945FF', '#14F195', '#F5A623', '#ff6060'];
+
+  const totalSweptUsd = (metrics?.total_swept_sol || 0) * SOL_USD;
+  const latestTreasury = treasuryHistory[treasuryHistory.length - 1]?.balance || metrics?.latest_treasury_sol || 0;
+
+  return (
+    <div className="page-container fade-in">
+      <p className="section-label fade-in-1">⚡ ANALYTICS</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
+        <h1 className="font-display fade-in-2" style={{ fontSize: 36, fontWeight: 900, color: '#9945FF' }}>ANALYTICS</h1>
+        {mintCfg && <span className="badge badge-green">LIVE DATA</span>}
+        {!mintCfg && <span className="badge badge-amber">AWAITING MINT CONFIG</span>}
+      </div>
+
+      {/* KPI row */}
+      <div className="grid-4 fade-in-2" style={{ marginBottom: 24 }}>
+        {[
+          { l: 'TOTAL TRANSACTIONS', v: metrics?.tx_count ?? '--', c: '#e8f0ff' },
+          { l: 'SWEPT SOL (ALL TIME)', v: `${(metrics?.total_swept_sol || 0).toFixed(4)} SOL`, c: '#9945FF' },
+          { l: 'SWEPT USD VALUE', v: `$${totalSweptUsd.toFixed(2)}`, c: '#14F195' },
+          { l: 'SAVED MISSIONS', v: metrics?.mission_count ?? '--', c: '#F5A623' },
+        ].map(({ l, v, c }) => (
+          <div key={l} className="stat-card">
+            <div className="stat-value" style={{ background: `linear-gradient(135deg, #e8f0ff 0%, ${c} 100%)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', fontSize: 22 }}>{v}</div>
+            <div className="stat-label">{l}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        {['overview', 'price', 'treasury', 'transactions', 'missions'].map(t => (
+          <button key={t} className={`btn btn-sm ${tab === t ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTab(t)}>
+            {t.toUpperCase()}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 12, color: '#3a5070' }}>
+          <span className="thinking-spinner" style={{ width: 24, height: 24, display: 'inline-block', marginBottom: 12 }} />
+          <div>Loading analytics...</div>
+        </div>
+      ) : (
+        <>
+          {tab === 'overview' && (
+            <div className="grid-2 fade-in">
+              {/* Treasury balance */}
+              <div className="card">
+                <p className="section-label" style={{ marginBottom: 12 }}>TREASURY BALANCE (SOL)</p>
+                {treasuryHistory.length > 1 ? (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <AreaChart data={treasuryHistory}>
+                      <defs>
+                        <linearGradient id="balGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#9945FF" stopOpacity={0.3} />
+                          <stop offset="100%" stopColor="#9945FF" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid vertical={false} />
+                      <XAxis dataKey="ts" tick={{ fontFamily: 'var(--font-mono)', fontSize: 9, fill: '#3a5070' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                      <YAxis tick={{ fontFamily: 'var(--font-mono)', fontSize: 9, fill: '#3a5070' }} tickLine={false} axisLine={false} width={45} />
+                      <Tooltip content={<CustomTip unit=" SOL" />} />
+                      <Area type="monotone" dataKey="balance" name="Balance" stroke="#9945FF" strokeWidth={2} fill="url(#balGrad)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : <EmptyChart />}
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#e8f0ff', marginTop: 8 }}>
+                  Current: <span style={{ color: '#9945FF', fontWeight: 700 }}>{latestTreasury.toFixed(4)} SOL</span>
+                  &nbsp;≈ <span style={{ color: '#14F195' }}>${(latestTreasury * SOL_USD).toFixed(2)}</span>
+                </div>
+              </div>
+              {/* Transaction volume */}
+              <div className="card">
+                <p className="section-label" style={{ marginBottom: 12 }}>TRANSACTION VOLUME (SOL/DAY)</p>
+                {txByDay.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <BarChart data={txByDay}>
+                      <CartesianGrid vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontFamily: 'var(--font-mono)', fontSize: 9, fill: '#3a5070' }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontFamily: 'var(--font-mono)', fontSize: 9, fill: '#3a5070' }} tickLine={false} axisLine={false} width={45} />
+                      <Tooltip content={<CustomTip unit=" SOL" />} />
+                      <Bar dataKey="volume" name="Volume" fill="#14F195" radius={[2, 2, 0, 0]} fillOpacity={0.8} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : <EmptyChart />}
+              </div>
+              {/* Mission pie */}
+              <div className="card">
+                <p className="section-label" style={{ marginBottom: 12 }}>MISSION STATUS</p>
+                {missionPie.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie data={missionPie} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value">
+                        {missionPie.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                      </Pie>
+                      <Legend wrapperStyle={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070' }} />
+                      <Tooltip content={<CustomTip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : <EmptyChart height={200} />}
+              </div>
+              {/* Sweep history summary */}
+              <div className="card">
+                <p className="section-label" style={{ marginBottom: 12 }}>SWEEP SUMMARY</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[
+                    { l: 'Total sweeps', v: metrics?.tx_count || 0 },
+                    { l: 'SOL recovered', v: `${(metrics?.total_swept_sol || 0).toFixed(4)} SOL` },
+                    { l: 'USD value', v: `$${totalSweptUsd.toFixed(2)}` },
+                    { l: 'Price snapshots', v: metrics?.price_points || 0 },
+                    { l: 'Treasury snapshots', v: metrics?.treasury_snapshots || 0 },
+                  ].map(({ l, v }) => (
+                    <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#3a5070' }}>{l}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: '#e8f0ff' }}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {tab === 'price' && (
+            <div className="card fade-in">
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
+                <p className="section-label" style={{ margin: 0 }}>YABBAI PRICE HISTORY</p>
+                {mintCfg && <CopyButton text={mintCfg.mint} label="COPY MINT" />}
+              </div>
+              {mintCfg && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070', marginBottom: 12 }}>Mint: {mintCfg.mint}</div>}
+              {priceHistory.length > 1 ? (
+                <ResponsiveContainer width="100%" height={320}>
+                  <LineChart data={priceHistory}>
+                    <defs>
+                      <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#14F195" stopOpacity={0.2} />
+                        <stop offset="100%" stopColor="#14F195" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid />
+                    <XAxis dataKey="ts" tick={{ fontFamily: 'var(--font-mono)', fontSize: 9, fill: '#3a5070' }} tickLine={false} axisLine={false} interval={Math.floor(priceHistory.length / 8)} />
+                    <YAxis tick={{ fontFamily: 'var(--font-mono)', fontSize: 9, fill: '#3a5070' }} tickLine={false} axisLine={false} width={80} tickFormatter={v => `$${v.toFixed(6)}`} />
+                    <Tooltip content={<CustomTip />} />
+                    <Line type="monotone" dataKey="price" name="Price" stroke="#14F195" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : <EmptyChart height={320} />}
+            </div>
+          )}
+
+          {tab === 'treasury' && (
+            <div className="card fade-in">
+              <p className="section-label" style={{ marginBottom: 14 }}>TREASURY BALANCE OVER TIME</p>
+              {treasuryHistory.length > 1 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <AreaChart data={treasuryHistory}>
+                      <defs>
+                        <linearGradient id="tGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#9945FF" stopOpacity={0.3} />
+                          <stop offset="100%" stopColor="#9945FF" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid />
+                      <XAxis dataKey="ts" tick={{ fontFamily: 'var(--font-mono)', fontSize: 9, fill: '#3a5070' }} tickLine={false} axisLine={false} interval={Math.floor(treasuryHistory.length / 8)} />
+                      <YAxis tick={{ fontFamily: 'var(--font-mono)', fontSize: 9, fill: '#3a5070' }} tickLine={false} axisLine={false} width={55} tickFormatter={v => v.toFixed(2)} />
+                      <Tooltip content={<CustomTip unit=" SOL" />} />
+                      <Area type="monotone" dataKey="balance" name="Balance" stroke="#9945FF" strokeWidth={2} fill="url(#tGrad)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#3a5070', marginTop: 12 }}>
+                    {treasuryHistory.length} snapshots recorded
+                  </div>
+                </>
+              ) : <EmptyChart height={280} />}
+            </div>
+          )}
+
+          {tab === 'transactions' && (
+            <div className="card fade-in">
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
+                <p className="section-label" style={{ margin: 0 }}>TRANSACTION HISTORY</p>
+                <span className="badge badge-purple">{transactions.length} RECORDS</span>
+              </div>
+              {transactions.length > 0 ? (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(153,69,255,0.15)' }}>
+                        {['TYPE', 'AMOUNT', 'FROM', 'TO', 'STATUS', 'SIG', 'TIMESTAMP'].map(h => (
+                          <th key={h} style={{ padding: '8px 10px', textAlign: 'left', color: '#3a5070', letterSpacing: '0.1em', fontSize: 10 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transactions.map(t => (
+                        <tr key={t.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                          <td style={{ padding: '7px 10px' }}><span className={`badge ${t.type === 'sweep' ? 'badge-green' : 'badge-purple'}`}>{t.type}</span></td>
+                          <td style={{ padding: '7px 10px', color: '#14F195', fontWeight: 700 }}>{t.amount_sol?.toFixed(4)} SOL</td>
+                          <td style={{ padding: '7px 10px', color: '#3a5070' }}>{t.from_address ? t.from_address.slice(0, 8) + '...' : '--'}</td>
+                          <td style={{ padding: '7px 10px', color: '#3a5070' }}>{t.to_address ? t.to_address.slice(0, 8) + '...' : '--'}</td>
+                          <td style={{ padding: '7px 10px' }}><span className={`badge ${t.status === 'confirmed' ? 'badge-green' : 'badge-amber'}`}>{t.status}</span></td>
+                          <td style={{ padding: '7px 10px' }}>
+                            {t.sig ? (
+                              <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                                <span style={{ color: '#2a4060' }}>{t.sig.slice(0, 10)}...</span>
+                                <CopyButton text={t.sig} />
+                              </div>
+                            ) : '--'}
+                          </td>
+                          <td style={{ padding: '7px 10px', color: '#2a4060', fontSize: 10 }}>{formatTs(t.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div style={{ padding: '32px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 12, color: '#3a5070' }}>
+                  No transactions recorded yet. Complete a treasury sweep to log your first transaction.
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'missions' && (
+            <div className="fade-in">
+              <div className="grid-2">
+                {missions.length > 0 ? missions.map(m => (
+                  <div key={m.id} className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <span style={{ fontFamily: 'var(--font-display)', fontSize: 14, color: '#e8f0ff' }}>{m.name}</span>
+                      <span className={`badge ${m.status === 'active' ? 'badge-green' : 'badge-amber'}`}>{m.status}</span>
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070', marginBottom: 8 }}>{m.mission_type}</div>
+                    <div className="grid-3">
+                      {[
+                        { l: 'AUTONOMY', v: `${m.autonomy}%`, c: '#9945FF' },
+                        { l: 'RISK', v: `${m.risk}%`, c: '#F5A623' },
+                        { l: 'APY EST', v: m.estimated_apy ? `${m.estimated_apy}%` : '--', c: '#14F195' },
+                      ].map(({ l, v, c }) => (
+                        <div key={l}>
+                          <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, color: c }}>{v}</div>
+                          <div className="stat-label">{l}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#2a4060', marginTop: 6 }}>
+                      Created: {formatTs(m.created_at)}
+                    </div>
+                  </div>
+                )) : (
+                  <div className="card" style={{ gridColumn: '1/-1', textAlign: 'center', padding: 40 }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#3a5070' }}>No saved missions. Go to Mission Builder to create and save a mission.</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

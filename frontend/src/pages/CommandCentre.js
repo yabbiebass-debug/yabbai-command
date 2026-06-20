@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useToast } from '../context/ToastContext';
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
 
 const PHASES = [
   { key: 'PUMP', label: 'Pump', idx: 0 },
@@ -142,6 +146,7 @@ const NeuralCanvas = () => {
 };
 
 export default function CommandCentre() {
+  const { error: toastError } = useToast();
   const [currentPhase, setCurrentPhase] = useState(2);
   const [stats, setStats] = useState({
     price: 0.002441,
@@ -155,6 +160,36 @@ export default function CommandCentre() {
   });
   const [events, setEvents] = useState([]);
   const [counter, setCounter] = useState(0);
+  const [backendData, setBackendData] = useState(null);
+
+  // Fetch backend analytics on mount
+  useEffect(() => {
+    const loadBackend = async () => {
+      try {
+        const res = await fetch(`${API}/analytics`);
+        if (res.status === 429) {
+          toastError('Rate limited - try again shortly');
+          return;
+        }
+        if (!res.ok) throw new Error('Failed to load analytics');
+        const data = await res.json();
+        setBackendData(data);
+        // Seed stats with real values if available
+        if (data.latest_treasury_sol) {
+          setStats(prev => ({ ...prev, treasury: data.latest_treasury_sol }));
+        }
+        if (data.mission_count) {
+          setStats(prev => ({ ...prev, missions: data.mission_count }));
+        }
+        if (data.tx_count) {
+          setStats(prev => ({ ...prev, txs: data.tx_count }));
+        }
+      } catch (e) {
+        // Silently continue with simulated data
+      }
+    };
+    loadBackend();
+  }, [toastError]);
 
   const genEvent = useCallback(() => {
     const template = EVENT_TEMPLATES[Math.floor(Math.random() * EVENT_TEMPLATES.length)];

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useToast } from '../context/ToastContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -78,6 +79,7 @@ const ChartCanvas = ({ candles }) => {
 };
 
 export default function YabbaiApp() {
+  const { error: toastError } = useToast();
   const [candles, setCandles] = useState(seedCandles);
   const [price, setPrice] = useState(null);
   const [mintCfg, setMintCfg] = useState(null);
@@ -92,23 +94,35 @@ export default function YabbaiApp() {
 
   useEffect(() => {
     fetch(`${API}/token-mint`)
-      .then(r => r.json())
+      .then(r => {
+        if (r.status === 429) {
+          toastError('Rate limited - try again shortly');
+          throw new Error('Rate limited');
+        }
+        return r.json();
+      })
       .then(d => { if (d.configured) { setMintCfg(d); mintRef.current = d.mint; } })
       .catch(() => {});
-  }, []);
+  }, [toastError]);
 
   useEffect(() => {
     if (!mintRef.current) return;
     const poll = () => {
       fetch(`${API}/jupiter-price?mint=${mintRef.current}`)
-        .then(r => r.json())
+        .then(r => {
+          if (r.status === 429) {
+            toastError('Price API rate limited - retrying shortly');
+            throw new Error('Rate limited');
+          }
+          return r.json();
+        })
         .then(d => { if (d.ok && d.price) setPrice(d.price); })
         .catch(() => {});
     };
     poll();
     const id = setInterval(poll, 15000);
     return () => clearInterval(id);
-  }, [mintCfg]);
+  }, [mintCfg, toastError]);
 
   useEffect(() => {
     const tick = setInterval(() => {

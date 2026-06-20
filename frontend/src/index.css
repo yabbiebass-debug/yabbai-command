@@ -414,3 +414,17 @@ textarea.field { resize:vertical; min-height:100px; line-height:1.6; }
 
 /* App reset */
 .App { background: var(--void); min-height: 100vh; }
+
+/* Skeleton shimmer */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Recharts custom */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line { stroke: rgba(153,69,255,0.08) !important; }
+.recharts-tooltip-wrapper { outline: none !important; }
+.recharts-default-tooltip { background: rgba(6,14,32,0.95) !important; border: 1px solid rgba(153,69,255,0.25) !important; border-radius: 6px !important; font-family: var(--font-mono) !important; font-size: 11px !important; }
+.recharts-tooltip-label { color: #9945FF !important; font-weight: 700 !important; }
+

@@ -164,18 +164,208 @@ class YabbaiAPITester:
             }
         )
 
+    # ── Phase 3+4 Tests ──────────────────────────────────────────────────────
+
+    def test_get_settings(self):
+        """Test getting settings (should return defaults if empty)"""
+        return self.run_test(
+            "Get Settings",
+            "GET",
+            "settings",
+            200
+        )
+
+    def test_save_settings(self):
+        """Test saving settings"""
+        return self.run_test(
+            "Save Settings",
+            "POST",
+            "settings",
+            200,
+            data={
+                "treasury_wallet": "7dzgCA8G55VytZ8PS1b99rbbctzCgJbnEoBEYBnn15YR",
+                "main_wallet": "TestWallet123456789012345678901234567890",
+                "slippage_bps": 100,
+                "autonomy_level": 80,
+                "risk_appetite": 50,
+                "demo_mode": True
+            }
+        )
+
+    def test_create_mission(self):
+        """Test creating a mission"""
+        success, response = self.run_test(
+            "Create Mission",
+            "POST",
+            "missions",
+            200,
+            data={
+                "name": "Test Mission Alpha",
+                "mission_type": "yield_farming",
+                "autonomy": 75,
+                "risk": 40,
+                "reinvest": 60,
+                "self_improve": True,
+                "status": "active",
+                "estimated_apy": 120
+            }
+        )
+        if success and response.get('id'):
+            self.mission_id = response['id']
+            print(f"   ✓ Mission created with ID: {self.mission_id}")
+        return success, response
+
+    def test_list_missions(self):
+        """Test listing missions"""
+        success, response = self.run_test(
+            "List Missions",
+            "GET",
+            "missions",
+            200
+        )
+        if success:
+            print(f"   ✓ Found {len(response)} mission(s)")
+        return success, response
+
+    def test_record_transaction(self):
+        """Test recording a transaction"""
+        success, response = self.run_test(
+            "Record Transaction",
+            "POST",
+            "transactions",
+            200,
+            data={
+                "type": "sweep",
+                "amount_sol": 1.234,
+                "from_address": "7dzgCA8G55VytZ8PS1b99rbbctzCgJbnEoBEYBnn15YR",
+                "to_address": "TestWallet123456789012345678901234567890",
+                "status": "confirmed",
+                "label": "Test sweep"
+            }
+        )
+        if success and response.get('id'):
+            print(f"   ✓ Transaction recorded with ID: {response['id']}")
+        return success, response
+
+    def test_list_transactions(self):
+        """Test listing transactions"""
+        success, response = self.run_test(
+            "List Transactions",
+            "GET",
+            "transactions",
+            200,
+            params={"limit": 50}
+        )
+        if success:
+            print(f"   ✓ Found {len(response)} transaction(s)")
+        return success, response
+
+    def test_add_price_snapshot(self):
+        """Test adding a price snapshot"""
+        return self.run_test(
+            "Add Price Snapshot",
+            "POST",
+            "price-snapshot",
+            200,
+            data={
+                "mint": "So11111111111111111111111111111111111111112",
+                "price": 0.002441
+            }
+        )
+
+    def test_get_price_history(self):
+        """Test getting price history"""
+        success, response = self.run_test(
+            "Get Price History",
+            "GET",
+            "price-history",
+            200,
+            params={"mint": "So11111111111111111111111111111111111111112", "limit": 100}
+        )
+        if success and response.get('ok'):
+            print(f"   ✓ Found {len(response.get('points', []))} price point(s)")
+        return success, response
+
+    def test_add_treasury_snapshot(self):
+        """Test adding a treasury snapshot"""
+        return self.run_test(
+            "Add Treasury Snapshot",
+            "POST",
+            "treasury-snapshot",
+            200,
+            data={
+                "address": "7dzgCA8G55VytZ8PS1b99rbbctzCgJbnEoBEYBnn15YR",
+                "balance_sol": 124.7,
+                "balance_usd": 22234.74
+            }
+        )
+
+    def test_get_treasury_snapshots(self):
+        """Test getting treasury snapshots"""
+        success, response = self.run_test(
+            "Get Treasury Snapshots",
+            "GET",
+            "treasury-snapshots",
+            200,
+            params={"limit": 100}
+        )
+        if success:
+            print(f"   ✓ Found {len(response)} treasury snapshot(s)")
+        return success, response
+
+    def test_add_event(self):
+        """Test adding an event"""
+        return self.run_test(
+            "Add Event",
+            "POST",
+            "events",
+            200,
+            data={
+                "text": "Test event from backend_test.py",
+                "color": "event-green",
+                "category": "test"
+            }
+        )
+
+    def test_get_events(self):
+        """Test getting events"""
+        success, response = self.run_test(
+            "Get Events",
+            "GET",
+            "events",
+            200,
+            params={"limit": 40}
+        )
+        if success:
+            print(f"   ✓ Found {len(response)} event(s)")
+        return success, response
+
+    def test_get_analytics(self):
+        """Test getting analytics aggregate"""
+        success, response = self.run_test(
+            "Get Analytics",
+            "GET",
+            "analytics",
+            200
+        )
+        if success:
+            print(f"   ✓ Analytics: {response.get('tx_count', 0)} txs, {response.get('mission_count', 0)} missions")
+            print(f"   ✓ Total swept: {response.get('total_swept_sol', 0)} SOL")
+        return success, response
+
 def main():
     print("=" * 60)
-    print("YABBAI BACKEND API TEST SUITE")
+    print("YABBAI BACKEND API TEST SUITE - PHASE 3+4")
     print("=" * 60)
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
 
     tester = YabbaiAPITester()
+    tester.mission_id = None
 
     # Run all tests
     print("\n" + "=" * 60)
-    print("RUNNING TESTS")
+    print("PHASE 1+2 TESTS (BASELINE)")
     print("=" * 60)
 
     # 1. Health check
@@ -195,6 +385,37 @@ def main():
     
     # 5. Cleanup
     tester.test_delete_token_mint()
+
+    print("\n" + "=" * 60)
+    print("PHASE 3+4 TESTS (NEW ENDPOINTS)")
+    print("=" * 60)
+
+    # Settings
+    tester.test_get_settings()
+    tester.test_save_settings()
+
+    # Missions
+    tester.test_create_mission()
+    tester.test_list_missions()
+
+    # Transactions
+    tester.test_record_transaction()
+    tester.test_list_transactions()
+
+    # Price history
+    tester.test_add_price_snapshot()
+    tester.test_get_price_history()
+
+    # Treasury snapshots
+    tester.test_add_treasury_snapshot()
+    tester.test_get_treasury_snapshots()
+
+    # Events
+    tester.test_add_event()
+    tester.test_get_events()
+
+    # Analytics aggregate
+    tester.test_get_analytics()
 
     # Print summary
     print("\n" + "=" * 60)
