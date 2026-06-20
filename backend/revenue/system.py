@@ -140,7 +140,7 @@ class RevenueSystem:
 
     # ── Dashboard Data ─────────────────────────────────────────────────────
 
-    def get_dashboard_data(self) -> Dict[str, Any]:
+    async def get_dashboard_data(self) -> Dict[str, Any]:
         """Get complete dashboard data."""
         return {
             "real_income": self.ledger.real_income(),
@@ -152,11 +152,11 @@ class RevenueSystem:
             "gates": self.gates.status(),
             "pending_approvals": self.gates.pending_approvals(),
             "channel_scores": {
-                "products": self.memory.channel_score("products"),
-                "agency": self.memory.channel_score("agency"),
-                "trading": self.memory.channel_score("trading"),
+                "products": await self.memory.channel_score("products"),
+                "agency": await self.memory.channel_score("agency"),
+                "trading": await self.memory.channel_score("trading"),
             },
-            "recent_learnings": self.memory.recent_learnings(20),
+            "recent_learnings": await self.memory.recent_learnings(20),
             "orchestrator": self.orchestrator.status(),
         }
 

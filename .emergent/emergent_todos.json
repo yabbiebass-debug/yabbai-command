@@ -1,22 +1,6 @@
 [
   {
-    "content": "Auto-generate REVENUE_ADMIN_KEY and update .env",
+    "content": "Test live data flow end-to-end",
     "status": "completed"
-  },
-  {
-    "content": "Create /revenue frontend dashboard with all controls",
-    "status": "in_progress"
-  },
-  {
-    "content": "Update /analytics to merge both data sources",
-    "status": "pending"
-  },
-  {
-    "content": "Add Revenue tab to navigation and hook up all routes",
-    "status": "pending"
-  },
-  {
-    "content": "Test entire integration end-to-end",
-    "status": "pending"
   }
 ]

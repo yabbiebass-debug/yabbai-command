@@ -25,6 +25,13 @@ db = db_mongo  # Alias for compatibility
 # Initialize Revenue System
 revenue_system = RevenueSystem(db_mongo)
 
+# Import after revenue_system is created
+from revenue.live_tracker import LiveTracker
+live_tracker = LiveTracker(db_mongo, revenue_system)
+
+# Background task reference
+background_task = None
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -421,7 +428,7 @@ def verify_revenue_admin(authorization: Optional[str] = Header(None)):
 async def revenue_dashboard():
     """Get complete revenue dashboard data."""
     try:
-        data = revenue_system.get_dashboard_data()
+        data = await revenue_system.get_dashboard_data()
         return JSONResponse(content=data)
     except Exception as e:
         logger.error(f"Revenue dashboard error: {e}")
@@ -577,6 +584,16 @@ async def revenue_webhook_product_sale(request: Request):
     try:
         data = await request.json()
         result = revenue_system.handle_product_sale(data)
+        
+        # Track in live system
+        if result.get("ok"):
+            await live_tracker.track_income(
+                source="product_sale",
+                amount=result.get("booked_usd", 0),
+                data=data
+            )
+            await live_tracker.track_metric(result.get("metric", {}))
+        
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"Revenue product sale webhook error: {e}")
@@ -588,10 +605,127 @@ async def revenue_webhook_invoice_paid(request: Request):
     try:
         data = await request.json()
         result = revenue_system.handle_invoice_paid(data)
+        
+        # Track in live system
+        if result.get("ok"):
+            await live_tracker.track_income(
+                source="invoice_paid",
+                amount=result.get("booked_usd", 0),
+                data=data
+            )
+            await live_tracker.track_metric(result.get("metric", {}))
+        
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"Revenue invoice paid webhook error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── Live Tracking Endpoints ────────────────────────────────────────────────
+
+@api_router.get("/revenue/live/status")
+async def revenue_live_status():
+    """Get live tracking status."""
+    try:
+        status = await live_tracker.get_live_status()
+        return JSONResponse(content=status)
+    except Exception as e:
+        logger.error(f"Revenue live status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/revenue/live/dashboard")
+async def revenue_live_dashboard():
+    """Get complete live dashboard with real-time data."""
+    try:
+        dashboard = await live_tracker.get_live_dashboard()
+        return JSONResponse(content=dashboard)
+    except Exception as e:
+        logger.error(f"Revenue live dashboard error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/revenue/live/metrics")
+async def revenue_live_metrics(limit: int = 50):
+    """Get live metrics stream."""
+    try:
+        metrics = await live_tracker.get_live_metrics(limit)
+        return JSONResponse(content={"metrics": metrics, "count": len(metrics)})
+    except Exception as e:
+        logger.error(f"Revenue live metrics error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/revenue/live/income")
+async def revenue_live_income(limit: int = 100):
+    """Get live income stream."""
+    try:
+        income = await live_tracker.get_live_income_stream(limit)
+        total = sum(item.get("amount", 0) for item in income)
+        return JSONResponse(content={
+            "income": income,
+            "count": len(income),
+            "total": round(total, 2)
+        })
+    except Exception as e:
+        logger.error(f"Revenue live income error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/revenue/live/start")
+async def revenue_live_start(authorization: Optional[str] = Header(None)):
+    """Manually start the live tracker (admin only)."""
+    verify_revenue_admin(authorization)
+    global background_task
+    try:
+        if not live_tracker.running:
+            background_task = asyncio.create_task(live_tracker.start_background_orchestrator())
+            return {"ok": True, "status": "started"}
+        return {"ok": True, "status": "already_running"}
+    except Exception as e:
+        logger.error(f"Revenue live start error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/revenue/live/stop")
+async def revenue_live_stop(authorization: Optional[str] = Header(None)):
+    """Manually stop the live tracker (admin only)."""
+    verify_revenue_admin(authorization)
+    global background_task
+    try:
+        await live_tracker.stop_background_orchestrator()
+        if background_task:
+            background_task.cancel()
+            background_task = None
+        return {"ok": True, "status": "stopped"}
+    except Exception as e:
+        logger.error(f"Revenue live stop error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# WebSocket for live updates
+@app.websocket("/ws/revenue/live")
+async def revenue_live_websocket(websocket: WebSocket):
+    """WebSocket endpoint for live revenue updates."""
+    await websocket.accept()
+    live_tracker.subscribe(websocket)
+    
+    try:
+        # Send initial status
+        status = await live_tracker.get_live_status()
+        await websocket.send_json({
+            "type": "connected",
+            "data": status,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        
+        # Keep connection alive
+        while True:
+            # Ping every 30 seconds
+            await asyncio.sleep(30)
+            await websocket.send_json({
+                "type": "ping",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+            
+    except WebSocketDisconnect:
+        live_tracker.unsubscribe(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        live_tracker.unsubscribe(websocket)
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -609,6 +743,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_revenue_tracker():
+    """Start the live revenue tracking on startup."""
+    global background_task
+    try:
+        # Start background orchestrator
+        background_task = asyncio.create_task(live_tracker.start_background_orchestrator())
+        logger.info("✅ Live Revenue Tracker started")
+    except Exception as e:
+        logger.error(f"Failed to start live tracker: {e}")
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    """Shutdown database and stop live tracker."""
+    global background_task
+    try:
+        await live_tracker.stop_background_orchestrator()
+        if background_task:
+            background_task.cancel()
+        logger.info("⏸️  Live Revenue Tracker stopped")
+    except Exception as e:
+        logger.error(f"Error stopping live tracker: {e}")
     client.close()

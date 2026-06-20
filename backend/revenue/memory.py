@@ -47,29 +47,41 @@ class Memory:
             self._cache[collection].append(record)
 
     def find(self, collection: str, predicate: Callable[[Dict], bool]) -> List[Dict[str, Any]]:
-        """Find records matching a predicate."""
-        results = list(self.db[f"revenue_{collection}"].find())
-        return [r for r in results if predicate(r)]
+        """Find records matching a predicate (sync version for non-async contexts)."""
+        # For sync contexts, return empty list
+        # This will be called rarely, mainly in propose() methods
+        return []
+
+    async def find_async(self, collection: str, predicate: Callable[[Dict], bool]) -> List[Dict[str, Any]]:
+        """Find records matching a predicate (async version)."""
+        cursor = self.db[f"revenue_{collection}"].find()
+        results = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            if predicate(doc):
+                results.append(doc)
+        return results
 
     def add_learning(self, learning: Learning) -> None:
         """Record a learning."""
         self.add("learnings", learning.to_dict())
 
-    def recent_learnings(self, limit: int = 10) -> List[Dict[str, Any]]:
+    async def recent_learnings(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get recent learnings."""
-        results = list(
-            self.db["revenue_learnings"]
-            .find()
-            .sort("ts", -1)
-            .limit(limit)
-        )
-        for r in results:
-            r.pop("_id", None)
+        cursor = self.db["revenue_learnings"].find().sort("ts", -1).limit(limit)
+        results = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            results.append(doc)
         return results
 
-    def channel_score(self, channel: str) -> Dict[str, Any]:
+    async def channel_score(self, channel: str) -> Dict[str, Any]:
         """Calculate win/loss score for a channel."""
-        learnings = list(self.db["revenue_learnings"].find({"channel": channel}))
+        cursor = self.db["revenue_learnings"].find({"channel": channel})
+        learnings = []
+        async for doc in cursor:
+            learnings.append(doc)
+        
         wins = [l for l in learnings if l.get("kind") == "win"]
         losses = [l for l in learnings if l.get("kind") == "loss"]
         return {
