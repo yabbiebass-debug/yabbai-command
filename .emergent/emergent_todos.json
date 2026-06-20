@@ -1,10 +1,18 @@
 [
   {
-    "content": "Add useMemo for expensive calculations in Payment.js and Analytics.js",
-    "status": "completed"
+    "content": "Remove ALL mock data from frontend (LEDGER_ROWS, MOCK_TOKENS, simulated animations)",
+    "status": "in_progress"
   },
   {
-    "content": "Document why console.error statements are intentional",
-    "status": "completed"
+    "content": "Make revenue data persistent across refreshes (MongoDB)",
+    "status": "pending"
+  },
+  {
+    "content": "Update treasury tracking to use real Solana RPC balance checks",
+    "status": "pending"
+  },
+  {
+    "content": "Remove simulated/demo modes from all components",
+    "status": "pending"
   }
 ]
