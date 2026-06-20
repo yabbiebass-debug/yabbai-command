@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 
 const PAYMENT_RAILS = [
   { id: 'paypal', name: 'PayPal', icon: '💳', type: 'fiat', status: 'live', bal: 2847.50 },
@@ -33,6 +33,12 @@ export default function Payment() {
   const [totalProcessed, setTotalProcessed] = useState(0);
   const [rails, setRails] = useState(PAYMENT_RAILS);
 
+  // Memoize expensive calculations
+  const realRows = useMemo(() => LEDGER_ROWS.filter(r => r.type === 'real'), []);
+  const mockRows = useMemo(() => LEDGER_ROWS.filter(r => r.type === 'mock'), []);
+  const realTotal = useMemo(() => realRows.reduce((a, r) => a + r.amount, 0).toFixed(2), [realRows]);
+  const mockTotal = useMemo(() => mockRows.reduce((a, r) => a + r.amount, 0).toFixed(2), [mockRows]);
+
   useEffect(() => {
     if (!ppRunning) return;
     const id = setInterval(() => {
@@ -45,9 +51,10 @@ export default function Payment() {
     return () => clearInterval(id);
   }, [ppRunning]);
 
-  const realRows = LEDGER_ROWS.filter(r => r.type === 'real');
-  const mockRows = LEDGER_ROWS.filter(r => r.type === 'mock');
-  const visRows = ledgerView === 'both' ? LEDGER_ROWS : ledgerView === 'real' ? realRows : mockRows;
+  // visRows depends on ledgerView
+  const visRows = useMemo(() => {
+    return ledgerView === 'both' ? LEDGER_ROWS : ledgerView === 'real' ? realRows : mockRows;
+  }, [ledgerView, realRows, mockRows]);
 
   return (
     <div className="page-container fade-in">
@@ -195,13 +202,13 @@ export default function Payment() {
         <div style={{ display: 'flex', gap: 24 }}>
           <div>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 900, color: '#14F195' }}>
-              ${realRows.reduce((a, r) => a + r.amount, 0).toFixed(2)}
+              ${realTotal}
             </span>
             <div className="stat-label">REAL TOTAL</div>
           </div>
           <div>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 900, color: '#F5A623' }}>
-              ${mockRows.reduce((a, r) => a + r.amount, 0).toFixed(2)}
+              ${mockTotal}
             </span>
             <div className="stat-label">MOCK TOTAL (EXCLUDED)</div>
           </div>

@@ -268,10 +268,13 @@ class GateController:
         if fn is None:
             return self._record(a, rc, GateOutcome.HALTED,
                                 [f"No executor registered for {a.channel}:{a.kind}"], qid=qid)
+        
+        result = None  # Initialize to prevent undefined variable
         try:
             result = fn(a, signature=signature) if a.kind == "real_trade" else fn(a)
         except Exception as e:
             return self._record(a, rc, GateOutcome.HALTED, [f"Executor error: {e}"], qid=qid)
+        
         # accounting
         if a.usd_amount and a.kind in ALWAYS_HIGH_KINDS:
             self._daily_spend += a.usd_amount
