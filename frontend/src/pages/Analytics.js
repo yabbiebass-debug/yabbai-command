@@ -22,7 +22,7 @@ const CustomTip = ({ active, payload, label, unit = '' }) => {
     <div style={{ background: 'rgba(6,14,32,0.97)', border: '1px solid rgba(153,69,255,0.25)', borderRadius: 6, padding: '8px 12px' }}>
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#9945FF', marginBottom: 4 }}>{label}</div>
       {payload.map((p, i) => (
-        <div key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: p.color }}>
+        <div key={`tooltip-${p.name}-${i}`} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: p.color }}>
           {p.name}: {p.value}{unit}
         </div>
       ))}

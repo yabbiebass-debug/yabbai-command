@@ -119,7 +119,7 @@ export default function SideHustle() {
         <div className="fade-in">
           <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
             {CALL_SCRIPTS.map((s, i) => (
-              <button key={i} className={`btn btn-sm ${activeScript === i ? 'btn-gold' : 'btn-outline'}`} onClick={() => setActiveScript(i)}>
+              <button key={`script-${s.title}`} className={`btn btn-sm ${activeScript === i ? 'btn-gold' : 'btn-outline'}`} onClick={() => setActiveScript(i)}>
                 {s.title}
               </button>
             ))}
@@ -129,7 +129,7 @@ export default function SideHustle() {
               CALL SCRIPT: {CALL_SCRIPTS[activeScript].title.toUpperCase()}
             </p>
             {CALL_SCRIPTS[activeScript].lines.map((line, i) => (
-              <div key={i} style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 4, background: line.role === 'YOU' ? 'rgba(212,160,23,0.06)' : 'rgba(255,255,255,0.03)', borderLeft: `3px solid ${line.role === 'YOU' ? 'var(--gold)' : '#3a3a20'}` }}>
+              <div key={`line-${line.role}-${i}`} style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 4, background: line.role === 'YOU' ? 'rgba(212,160,23,0.06)' : 'rgba(255,255,255,0.03)', borderLeft: `3px solid ${line.role === 'YOU' ? 'var(--gold)' : '#3a3a20'}` }}>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: line.role === 'YOU' ? 'var(--gold)' : '#5a5a40', marginBottom: 5, letterSpacing: '0.12em' }}>{line.role}</div>
                 <div style={{ fontFamily: 'var(--font-manrope)', fontSize: 13, color: 'var(--warm-white)', lineHeight: 1.6 }}>{line.text}</div>
               </div>

@@ -215,7 +215,7 @@ export default function Wallet() {
               <p className="section-label" style={{ marginBottom: 12 }}>TOKEN ACCOUNTS</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {tokens.map((t, i) => (
-                  <div key={i} style={{
+                  <div key={`token-${t.mint || i}`} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     padding: '10px 12px', border: '1px solid rgba(153,69,255,0.1)', borderRadius: 6,
                   }}>

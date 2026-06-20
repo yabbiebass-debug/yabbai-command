@@ -1,6 +1,10 @@
 [
   {
-    "content": "Run testing agent to verify fixes don't break functionality",
+    "content": "Verify Python is/== patterns (they should be correct for None checks)",
+    "status": "completed"
+  },
+  {
+    "content": "Document why console.error statements are intentional",
     "status": "completed"
   }
 ]

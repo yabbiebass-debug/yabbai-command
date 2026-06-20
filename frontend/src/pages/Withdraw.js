@@ -472,7 +472,7 @@ export default function Withdraw() {
                 ['Sweep', 'Phantom prompts to sign — transaction broadcast to mainnet'],
                 ['Confirmed', 'Funds arrive in your destination wallet in seconds'],
               ].map(([step, desc], i) => (
-                <li key={i}>
+                <li key={`sweep-step-${step}`}>
                   <span style={{ color: '#9945FF', fontWeight: 700 }}>{step}</span>
                   <span style={{ color: '#2a4060' }}> — {desc}</span>
                 </li>
@@ -489,7 +489,7 @@ export default function Withdraw() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {history.map((h, i) => (
-                  <div key={i} style={{
+                  <div key={`history-${h.sig || i}`} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     padding: '8px 10px',
                     background: 'rgba(20,241,149,0.04)',

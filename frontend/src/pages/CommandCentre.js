@@ -79,6 +79,8 @@ const WaveformCanvas = () => {
     };
     draw();
     return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Animation loop intentionally runs once - re-running would create duplicate RAF loops
   }, []);
 
   return <canvas ref={canvasRef} className="waveform-canvas" style={{ height: 72 }} />;
@@ -132,6 +134,8 @@ const NeuralCanvas = () => {
     };
     draw();
     return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Animation loop intentionally runs once - re-running would create duplicate RAF loops
   }, []);
 
   return (

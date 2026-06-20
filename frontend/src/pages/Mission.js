@@ -218,7 +218,7 @@ export default function Mission() {
           <div className="card" style={{ flex: '0 0 auto' }}>
             <p className="section-label" style={{ marginBottom: 10 }}>AI CONSOLE</p>
             <div ref={consoleRef} className="mission-output" style={{ minHeight: 120 }}>
-              {consoleLines.map((line, i) => <div key={i}>{line}</div>)}
+              {consoleLines.map((line, i) => <div key={`console-${i}-${line.substring(0, 20)}`}>{line}</div>)}
               {(thinking || consoleLines.length > 0) && <span className="typewriter-cursor" />}
             </div>
           </div>

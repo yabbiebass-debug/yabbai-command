@@ -73,6 +73,8 @@ const ChartCanvas = ({ candles }) => {
     ctx.fillStyle = 'rgba(20,241,149,0.9)';
     ctx.font = '600 10px JetBrains Mono';
     ctx.fillText(`$${last.close.toFixed(6)}`, lastX - 80, lastY - 5);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Canvas re-draws when candles prop changes - other variables are scoped within effect
   }, [candles]);
 
   return <canvas ref={canvasRef} style={{ width: '100%', height: 220, borderRadius: 6 }} />;

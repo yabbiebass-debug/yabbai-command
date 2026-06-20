@@ -148,7 +148,7 @@ Multiplier: 2.8x in 12 months`;
           <div className="basham-card">
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: 9, letterSpacing: '0.15em', color: 'var(--gold)', marginBottom: 14, textTransform: 'uppercase' }}>BUSINESS AUDIT</p>
             {AUDIT_QUESTIONS.map((q, i) => (
-              <div key={i} style={{ marginBottom: 14 }}>
+              <div key={`audit-${i}-${q.substring(0, 20)}`} style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontFamily: 'var(--font-manrope)', fontSize: 12, color: 'var(--warm-white)', marginBottom: 5 }}>{q}</label>
                 <input
                   className="field field-gold"
