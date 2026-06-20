@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, Query, Header
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -6,19 +6,24 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-import os, logging, httpx, re, asyncio, time
+import os, logging, httpx, re, asyncio, time, secrets
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional, List, Any, Dict
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
+from revenue.system import RevenueSystem
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ.get('DB_NAME', 'yabbai')]
+db_mongo = client[os.environ.get('DB_NAME', 'yabbai')]
+db = db_mongo  # Alias for compatibility
+
+# Initialize Revenue System
+revenue_system = RevenueSystem(db_mongo)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -392,6 +397,203 @@ async def get_analytics():
     }
 
 # ── Health ───────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REVENUE SYSTEM ROUTES
+# ─────────────────────────────────────────────────────────────────────────────
+
+REVENUE_ADMIN_KEY = os.getenv("REVENUE_ADMIN_KEY")
+
+def verify_revenue_admin(authorization: Optional[str] = Header(None)):
+    """Verify revenue admin key."""
+    if not REVENUE_ADMIN_KEY:
+        raise HTTPException(status_code=500, detail="Revenue admin key not configured")
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header required")
+    
+    # Support "Bearer <key>" or just "<key>"
+    token = authorization.replace("Bearer ", "").strip()
+    if token != REVENUE_ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="Invalid revenue admin key")
+    return True
+
+@api_router.get("/revenue/dashboard")
+async def revenue_dashboard():
+    """Get complete revenue dashboard data."""
+    try:
+        data = revenue_system.get_dashboard_data()
+        return JSONResponse(content=data)
+    except Exception as e:
+        logger.error(f"Revenue dashboard error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/revenue/status")
+async def revenue_status():
+    """Get revenue system status (public)."""
+    try:
+        return {
+            "real_income": revenue_system.ledger.real_income(),
+            "net_profit": revenue_system.ledger.net_profit(),
+            "gates": revenue_system.gates.status(),
+            "channels": ["products", "agency", "trading"],
+        }
+    except Exception as e:
+        logger.error(f"Revenue status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/revenue/approvals")
+async def revenue_approvals(authorization: Optional[str] = Header(None)):
+    """Get pending approvals queue (admin only)."""
+    verify_revenue_admin(authorization)
+    try:
+        approvals = revenue_system.gates.pending_approvals()
+        return {"ok": True, "approvals": approvals}
+    except Exception as e:
+        logger.error(f"Revenue approvals error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/revenue/actions/propose")
+async def revenue_propose_action(
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Propose a new action."""
+    verify_revenue_admin(authorization)
+    try:
+        data = await request.json()
+        result = revenue_system.propose_action(data)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Revenue propose action error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/revenue/actions/approve/{queue_id}")
+async def revenue_approve_action(
+    queue_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Approve a queued action."""
+    verify_revenue_admin(authorization)
+    try:
+        data = await request.json()
+        approver = data.get("approver", "admin")
+        signature = data.get("signature")
+        result = revenue_system.approve_action(queue_id, approver, signature)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Revenue approve action error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/revenue/actions/reject/{queue_id}")
+async def revenue_reject_action(
+    queue_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Reject a queued action."""
+    verify_revenue_admin(authorization)
+    try:
+        data = await request.json()
+        approver = data.get("approver", "admin")
+        reason = data.get("reason", "")
+        result = revenue_system.reject_action(queue_id, approver, reason)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Revenue reject action error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/revenue/compliance/check")
+async def revenue_check_compliance(request: Request):
+    """Check text for compliance violations."""
+    try:
+        data = await request.json()
+        text = data.get("text", "")
+        context = data.get("context", "general")
+        result = revenue_system.check_compliance(text, context)
+        # Convert ComplianceResult to dict
+        return {
+            "ok": result.ok,
+            "issues": result.issues,
+            "requires_human": result.requires_human,
+            "note": result.note,
+        }
+    except Exception as e:
+        logger.error(f"Revenue compliance check error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/revenue/kill-switch/engage")
+async def revenue_engage_kill_switch(authorization: Optional[str] = Header(None)):
+    """Engage the kill switch (halt all activity)."""
+    verify_revenue_admin(authorization)
+    try:
+        result = revenue_system.engage_kill_switch()
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Revenue kill-switch engage error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/revenue/kill-switch/disengage")
+async def revenue_disengage_kill_switch(authorization: Optional[str] = Header(None)):
+    """Disengage the kill switch."""
+    verify_revenue_admin(authorization)
+    try:
+        result = revenue_system.disengage_kill_switch()
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Revenue kill-switch disengage error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/revenue/caps/update")
+async def revenue_update_caps(
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """Update capital caps (can only tighten)."""
+    verify_revenue_admin(authorization)
+    try:
+        data = await request.json()
+        result = revenue_system.update_caps(data)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Revenue update caps error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/revenue/orchestrator/cycle")
+async def revenue_run_cycle(authorization: Optional[str] = Header(None)):
+    """Run one orchestrator cycle."""
+    verify_revenue_admin(authorization)
+    try:
+        result = revenue_system.run_cycle()
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Revenue orchestrator cycle error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Webhooks (signed for production - basic version for now)
+@api_router.post("/revenue/webhooks/product-sale")
+async def revenue_webhook_product_sale(request: Request):
+    """Product sale webhook (Stripe, Gumroad, etc.)."""
+    try:
+        data = await request.json()
+        result = revenue_system.handle_product_sale(data)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Revenue product sale webhook error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/revenue/webhooks/invoice-paid")
+async def revenue_webhook_invoice_paid(request: Request):
+    """Invoice paid webhook (for agency services)."""
+    try:
+        data = await request.json()
+        result = revenue_system.handle_invoice_paid(data)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Revenue invoice paid webhook error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 @api_router.get("/")
 async def root():
