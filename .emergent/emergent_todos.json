@@ -1,18 +1,14 @@
 [
   {
-    "content": "Update Wallet.js to fetch real token balances from Solana RPC",
+    "content": "Fix agent_pool.py undefined 'now' variable bug",
     "status": "in_progress"
   },
   {
-    "content": "Add sweep functionality for all tokens to main wallet",
+    "content": "Add useMemo to ToastContext inline object",
     "status": "pending"
   },
   {
-    "content": "Configure main wallet address in Settings",
-    "status": "pending"
-  },
-  {
-    "content": "Add 'Sweep All' master button",
+    "content": "Document animation hooks with eslint-disable",
     "status": "pending"
   }
 ]
