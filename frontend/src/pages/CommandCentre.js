@@ -4,49 +4,94 @@ import { useToast } from '../context/ToastContext';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-const PHASES = [
-  { key: 'PUMP', label: 'Pump', idx: 0 },
-  { key: 'ESKY', label: 'Esky', idx: 1 },
-  { key: 'MISSION', label: 'Mission', idx: 2 },
-  { key: 'SCALE', label: 'Scale', idx: 3 },
-  { key: 'WITHDRAW', label: 'Withdraw', idx: 4 },
-];
-
-const EVENT_TEMPLATES = [
-  (n) => ({ text: `mission.deploy(${n})`, color: 'event-purple' }),
-  (n) => ({ text: `yield.harvest(+$${(Math.random()*120+10).toFixed(2)})`, color: 'event-green' }),
-  (n) => ({ text: `lp.reinvest(${(Math.random()*0.5+0.1).toFixed(3)} SOL)`, color: 'event-green' }),
-  () => ({ text: `risk.check() → PASS`, color: 'event-purple' }),
-  () => ({ text: `treasury.sweep() → OK`, color: 'event-green' }),
-  () => ({ text: `wallet.sync() → ${(Math.random()*100+50).toFixed(2)} SOL`, color: 'event-purple' }),
-  () => ({ text: `autonomy.tick(${(Math.random()*100).toFixed(0)}%)`, color: 'event-purple' }),
-  () => ({ text: `solana.rpc → ${Math.round(Math.random()*100+20)}ms`, color: 'event-green' }),
-  () => ({ text: `holder.new(${Math.floor(Math.random()*1000+1000)})`, color: '' }),
-  () => ({ text: `ERROR: jupiter timeout → retrying`, color: 'event-amber' }),
-  () => ({ text: `payment.paypal.payout($${(Math.random()*200+50).toFixed(2)})`, color: 'event-green' }),
-  () => ({ text: `mcap.update($${(Math.random()*500000+1000000).toLocaleString()})`, color: '' }),
-];
-
-const STAT_KEYS = [
-  { key: 'price', label: 'PRICE', fmt: (v) => `$${v.toFixed(6)}`, color: '#e8f0ff' },
-  { key: 'mcap', label: 'MCAP', fmt: (v) => `$${(v/1e6).toFixed(2)}M`, color: '#14F195' },
-  { key: 'holders', label: 'HOLDERS', fmt: (v) => v.toLocaleString(), color: '#9945FF' },
-  { key: 'missions', label: 'MISSIONS', fmt: (v) => v.toString(), color: '#14F195' },
-  { key: 'yield', label: 'YIELD TODAY', fmt: (v) => `$${v.toFixed(2)}`, color: '#14F195' },
-  { key: 'treasury', label: 'TREASURY SOL', fmt: (v) => `${v.toFixed(2)} SOL`, color: '#9945FF' },
-  { key: 'apy', label: 'APY', fmt: (v) => `${v.toFixed(0)}%`, color: '#F5A623' },
-  { key: 'txs', label: 'TXS TODAY', fmt: (v) => v.toLocaleString(), color: '#e8f0ff' },
-];
-
-function randomWiggle(base, pct = 0.01) {
-  return base * (1 + (Math.random() - 0.5) * 2 * pct);
-}
-
-const WaveformCanvas = () => {
+export default function CommandCentre() {
+  const { error: toastError } = useToast();
+  const [stats, setStats] = useState({
+    real_income: 0,
+    net_profit: 0,
+    agents_active: 0,
+    cycles_completed: 0,
+    pending_approvals: 0,
+    kill_switch: false,
+  });
+  const [liveStatus, setLiveStatus] = useState(null);
+  const [agentStatus, setAgentStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [events, setEvents] = useState([]);
   const canvasRef = useRef(null);
+  const neuralRef = useRef(null);
   const frameRef = useRef(0);
-  const offsets = useRef([...Array(8)].map((_, i) => i * 0.4));
+  const offsets = useRef([0, Math.PI / 3, (2 * Math.PI) / 3]);
 
+  // Load real data from APIs
+  useEffect(() => {
+    const loadRealData = async () => {
+      try {
+        // Fetch revenue status
+        const revenueRes = await fetch(`${API}/revenue/status`);
+        const revenueData = await revenueRes.json();
+
+        // Fetch agent pool status
+        const agentRes = await fetch(`${API}/agents/status`);
+        const agentData = await agentRes.json();
+
+        // Fetch live tracking status
+        const liveRes = await fetch(`${API}/revenue/live/status`);
+        const liveData = await liveRes.json();
+
+        // Update stats with REAL data
+        setStats({
+          real_income: revenueData.real_income || 0,
+          net_profit: revenueData.net_profit || 0,
+          agents_active: agentData.total_agents || 0,
+          cycles_completed: agentData.total_cycles || 0,
+          pending_approvals: revenueData.gates?.pending || 0,
+          kill_switch: revenueData.gates?.kill_switch || false,
+        });
+
+        setLiveStatus(liveData);
+        setAgentStatus(agentData);
+
+        // Generate live events from real data
+        const newEvents = [];
+        if (agentData.total_revenue > 0) {
+          newEvents.push({
+            type: 'revenue',
+            message: `Revenue: $${agentData.total_revenue.toFixed(2)}`,
+            time: new Date().toLocaleTimeString(),
+          });
+        }
+        if (agentData.total_agents > 0) {
+          newEvents.push({
+            type: 'agent',
+            message: `${agentData.total_agents} agents active`,
+            time: new Date().toLocaleTimeString(),
+          });
+        }
+        if (agentData.total_cycles > 0) {
+          newEvents.push({
+            type: 'cycle',
+            message: `${agentData.total_cycles} cycles completed`,
+            time: new Date().toLocaleTimeString(),
+          });
+        }
+
+        setEvents(prev => [...newEvents, ...prev].slice(0, 10));
+
+      } catch (e) {
+        console.error('Failed to load command centre data:', e);
+        toastError('Failed to load dashboard data');
+      }
+      setLoading(false);
+    };
+
+    loadRealData();
+    // Refresh every 5 seconds
+    const interval = setInterval(loadRealData, 5000);
+    return () => clearInterval(interval);
+  }, [toastError]);
+
+  // Waveform canvas (visual only)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -83,53 +128,50 @@ const WaveformCanvas = () => {
     // Animation loop intentionally runs once - re-running would create duplicate RAF loops
   }, []);
 
-  return <canvas ref={canvasRef} className="waveform-canvas" style={{ height: 72 }} />;
-};
-
-const NeuralCanvas = () => {
-  const canvasRef = useRef(null);
-  const nodesRef = useRef([]);
-
+  // Neural network canvas (visual only)
   useEffect(() => {
-    const canvas = canvasRef.current;
+    const canvas = neuralRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    let raf;
     const N = 40;
     const nodes = Array.from({ length: N }, () => ({
-      x: Math.random(), y: Math.random(),
-      vx: (Math.random() - 0.5) * 0.0008,
-      vy: (Math.random() - 0.5) * 0.0008,
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
     }));
-    nodesRef.current = nodes;
+    let raf;
     const draw = () => {
       const W = canvas.width = canvas.offsetWidth;
-      const H = canvas.height = canvas.offsetHeight;
+      const H = canvas.height = canvas.offsetHeight || 200;
       ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = 'rgba(6,14,32,0.9)';
+      ctx.fillRect(0, 0, W, H);
       nodes.forEach(n => {
-        n.x += n.vx; n.y += n.vy;
-        if (n.x < 0 || n.x > 1) n.vx *= -1;
-        if (n.y < 0 || n.y > 1) n.vy *= -1;
+        n.x = (n.x + n.vx + 100) % 100;
+        n.y = (n.y + n.vy + 100) % 100;
       });
       for (let i = 0; i < N; i++) {
         for (let j = i + 1; j < N; j++) {
-          const dx = (nodes[i].x - nodes[j].x) * W;
-          const dy = (nodes[i].y - nodes[j].y) * H;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < 140) {
-            ctx.beginPath();
-            ctx.strokeStyle = `rgba(153,69,255,${0.12 * (1 - dist / 140)})`;
+          const a = nodes[i], b = nodes[j];
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < 15) {
+            ctx.strokeStyle = `rgba(153,69,255,${0.5 * (1 - d / 15)})`;
             ctx.lineWidth = 0.5;
-            ctx.moveTo(nodes[i].x * W, nodes[i].y * H);
-            ctx.lineTo(nodes[j].x * W, nodes[j].y * H);
+            ctx.beginPath();
+            ctx.moveTo((a.x / 100) * W, (a.y / 100) * H);
+            ctx.lineTo((b.x / 100) * W, (b.y / 100) * H);
             ctx.stroke();
           }
         }
-        ctx.beginPath();
-        ctx.fillStyle = 'rgba(20,241,149,0.4)';
-        ctx.arc(nodes[i].x * W, nodes[i].y * H, 2, 0, Math.PI * 2);
-        ctx.fill();
       }
+      nodes.forEach(n => {
+        ctx.fillStyle = '#14F195';
+        ctx.beginPath();
+        ctx.arc((n.x / 100) * W, (n.y / 100) * H, 2, 0, Math.PI * 2);
+        ctx.fill();
+      });
       raf = requestAnimationFrame(draw);
     };
     draw();
@@ -138,240 +180,177 @@ const NeuralCanvas = () => {
     // Animation loop intentionally runs once - re-running would create duplicate RAF loops
   }, []);
 
-  return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        position: 'absolute', inset: 0, width: '100%', height: '100%',
-        opacity: 0.4, pointerEvents: 'none',
-      }}
-    />
-  );
-};
-
-export default function CommandCentre() {
-  const { error: toastError } = useToast();
-  const [currentPhase, setCurrentPhase] = useState(2);
-  const [stats, setStats] = useState({
-    price: 0.002441,
-    mcap: 2440000,
-    holders: 1337,
-    missions: 42,
-    yield: 847.33,
-    treasury: 124.7,
-    apy: 847,
-    txs: 12441,
-  });
-  const [events, setEvents] = useState([]);
-  const [counter, setCounter] = useState(0);
-  const [backendData, setBackendData] = useState(null);
-
-  // Fetch backend analytics on mount
-  useEffect(() => {
-    const loadBackend = async () => {
-      try {
-        const res = await fetch(`${API}/analytics`);
-        if (res.status === 429) {
-          toastError('Rate limited - try again shortly');
-          return;
-        }
-        if (!res.ok) throw new Error('Failed to load analytics');
-        const data = await res.json();
-        setBackendData(data);
-        // Seed stats with real values if available
-        if (data.latest_treasury_sol) {
-          setStats(prev => ({ ...prev, treasury: data.latest_treasury_sol }));
-        }
-        if (data.mission_count) {
-          setStats(prev => ({ ...prev, missions: data.mission_count }));
-        }
-        if (data.tx_count) {
-          setStats(prev => ({ ...prev, txs: data.tx_count }));
-        }
-      } catch (e) {
-        console.error('Failed to load analytics:', e);
-        // Continue with simulated data
-      }
-    };
-    loadBackend();
-  }, [toastError]);
-
-  const genEvent = useCallback(() => {
-    const template = EVENT_TEMPLATES[Math.floor(Math.random() * EVENT_TEMPLATES.length)];
-    const { text, color } = template(Math.floor(Math.random() * 1000));
-    const ts = new Date().toTimeString().slice(0, 8);
-    return { id: Date.now() + Math.random(), ts, text, color };
-  }, []);
-
-  useEffect(() => {
-    // Seed events
-    setEvents(Array.from({ length: 8 }, genEvent));
-  }, [genEvent]);
-
-  useEffect(() => {
-    const tick = setInterval(() => {
-      setStats(prev => ({
-        price: randomWiggle(prev.price, 0.02),
-        mcap: randomWiggle(prev.mcap, 0.015),
-        holders: prev.holders + (Math.random() > 0.7 ? 1 : 0),
-        missions: prev.missions + (Math.random() > 0.85 ? 1 : 0),
-        yield: prev.yield + Math.random() * 0.5,
-        treasury: randomWiggle(prev.treasury, 0.005),
-        apy: randomWiggle(prev.apy, 0.01),
-        txs: prev.txs + Math.floor(Math.random() * 5),
-      }));
-      setCounter(c => c + 1);
-    }, 1200);
-    return () => clearInterval(tick);
-  }, []);
-
-  useEffect(() => {
-    if (counter === 0) return;
-    const ev = genEvent();
-    setEvents(prev => [ev, ...prev].slice(0, 40));
-  }, [counter, genEvent]);
+  if (loading) {
+    return (
+      <div className="page-container fade-in">
+        <p className="section-label">⚡ COMMAND CENTRE</p>
+        <div className="card">
+          <p style={{ color: '#3a5070' }}>Loading command centre...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-container fade-in">
-      {/* Hero */}
-      <section
-        style={{
-          position: 'relative', textAlign: 'center', padding: '56px 0 44px',
-          overflow: 'hidden', borderRadius: 12,
-          background: 'rgba(6,14,32,0.7)',
-          border: '1px solid rgba(153,69,255,0.12)',
-          marginBottom: 32,
-        }}
-      >
-        <NeuralCanvas />
-        <div style={{ position: 'relative', zIndex: 2 }}>
-          <p className="section-label fade-in-1">⚡ AUTONOMOUS INCOME PLATFORM</p>
-          <h1
-            className="font-display fade-in-2"
-            style={{
-              fontSize: 'clamp(52px,10vw,120px)', fontWeight: 900, lineHeight: 1,
-              background: 'linear-gradient(135deg, #fff 0%, #9945FF 40%, #14F195 80%)',
-              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text', letterSpacing: '0.05em', marginBottom: 8,
-            }}
-          >
-            YABBAI
-          </h1>
-          <p
-            className="fade-in-3"
-            style={{
-              fontFamily: 'var(--font-mono)', fontSize: 11, color: '#3a5070',
-              letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: 28,
-            }}
-          >
-            COMMAND CENTRE — SOLANA YIELD PROTOCOL
-          </p>
+      <p className="section-label fade-in-1">⚡ YABBAI COMMAND CENTRE</p>
 
-          {/* Phase Tracker */}
-          <div className="fade-in-4" style={{ display: 'flex', justifyContent: 'center', padding: '0 24px' }}>
-            <div className="phase-tracker" style={{ width: '100%', maxWidth: 540 }}>
-              {PHASES.map((phase, i) => (
-                <React.Fragment key={phase.key}>
-                  <div
-                    className={`phase-dot${
-                      i < currentPhase ? ' complete' : i === currentPhase ? ' active' : ''
-                    }`}
-                    onClick={() => setCurrentPhase(i)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <div className="phase-circle">
-                      {i < currentPhase ? '✓' : i + 1}
-                    </div>
-                    <span className="phase-label">{phase.label}</span>
-                  </div>
-                  {i < PHASES.length - 1 && (
-                    <div className={`phase-line${i < currentPhase ? ' complete' : ''}`} />
-                  )}
-                </React.Fragment>
-              ))}
+      {/* Live Status Banner */}
+      <div className="card fade-in-2" style={{ 
+        marginBottom: 24,
+        background: stats.kill_switch ? 'rgba(255,69,69,0.1)' : 'rgba(20,241,149,0.05)',
+        borderColor: stats.kill_switch ? '#ff4545' : '#14F195'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ 
+              fontSize: 11, 
+              fontWeight: 700, 
+              letterSpacing: '0.1em', 
+              color: stats.kill_switch ? '#ff4545' : '#14F195',
+              marginBottom: 4
+            }}>
+              {stats.kill_switch ? '🔴 SYSTEM HALTED' : '🟢 SYSTEM OPERATIONAL'}
             </div>
+            <p style={{ margin: 0, fontSize: 13, color: '#3a5070' }}>
+              {stats.agents_active} agents running • {stats.cycles_completed} cycles completed
+              {stats.pending_approvals > 0 && ` • ${stats.pending_approvals} pending approvals`}
+            </p>
           </div>
-        </div>
-      </section>
-
-      {/* Live Stats */}
-      <div className="fade-in-2" style={{ marginBottom: 28 }}>
-        <p className="section-label">• LIVE STATS</p>
-        <div className="grid-4">
-          {STAT_KEYS.map(({ key, label, fmt, color }) => (
-            <div key={key} className="stat-card fade-in">
-              <div className="stat-value" style={{
-                background: `linear-gradient(135deg, #e8f0ff 0%, ${color} 100%)`,
-                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
-              }}>
-                {fmt(stats[key])}
-              </div>
-              <div className="stat-label">
-                <span className="live-dot" style={{ width: 5, height: 5, marginRight: 5 }} />
-                {label}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Events + Waveform */}
-      <div className="grid-2 fade-in-3" style={{ marginBottom: 28 }}>
-        <div className="card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <span className="live-dot" />
-            <span className="section-label" style={{ margin: 0 }}>LIVE EVENTS</span>
-          </div>
-          <div className="event-stream">
-            {events.map(ev => (
-              <div key={ev.id} className="event-item">
-                <span className="event-time">{ev.ts}</span>
-                <span className={ev.color}>{ev.text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <span className="live-dot" />
-            <span className="section-label" style={{ margin: 0 }}>API PULSE WAVEFORM</span>
-          </div>
-          <WaveformCanvas />
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
-            {['JUPITER', 'SOLANA RPC', 'TREASURY', 'PAYPAL'].map(label => (
-              <div key={label} style={{ textAlign: 'center' }}>
-                <div className="live-dot" style={{ margin: '0 auto 3px' }} />
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070', letterSpacing: '0.08em' }}>{label}</span>
-              </div>
-            ))}
-          </div>
-          <div className="divider" style={{ marginTop: 16 }} />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            {[
-              { label: 'UPTIME', value: '99.9%', color: '#14F195' },
-              { label: 'AVG LATENCY', value: '47ms', color: '#9945FF' },
-              { label: 'REQUESTS', value: '24,441', color: '#e8f0ff' },
-              { label: 'SUCCESS RATE', value: '98.7%', color: '#14F195' },
-            ].map(({ label, value, color }) => (
-              <div key={label}>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 900, color }}>{value}</div>
-                <div className="stat-label">{label}</div>
-              </div>
-            ))}
+          <div style={{ 
+            fontFamily: 'var(--font-mono)', 
+            fontSize: 11, 
+            color: '#3a5070' 
+          }}>
+            Live Refresh: 5s
           </div>
         </div>
       </div>
 
-      {/* Quick actions */}
-      <div className="card fade-in-4">
-        <p className="section-label" style={{ marginBottom: 14 }}>QUICK ACTIONS</p>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button className="btn btn-primary">Deploy Mission</button>
-          <button className="btn btn-green">Harvest Yields</button>
-          <button className="btn btn-outline">View Treasury</button>
-          <button className="btn btn-outline">Sync Wallets</button>
-          <button className="btn btn-outline">Run Audit</button>
+      {/* Real Stats Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+        <div className="card fade-in-3">
+          <div className="stat-label">REAL INCOME</div>
+          <div style={{ 
+            fontFamily: 'var(--font-mono)', 
+            fontSize: 28, 
+            fontWeight: 900, 
+            color: '#14F195',
+            textShadow: '0 0 20px rgba(20,241,149,0.3)'
+          }}>
+            ${stats.real_income.toFixed(2)}
+          </div>
         </div>
+
+        <div className="card fade-in-3">
+          <div className="stat-label">NET PROFIT</div>
+          <div style={{ 
+            fontFamily: 'var(--font-mono)', 
+            fontSize: 28, 
+            fontWeight: 900, 
+            color: stats.net_profit >= 0 ? '#14F195' : '#ff4545'
+          }}>
+            ${stats.net_profit.toFixed(2)}
+          </div>
+        </div>
+
+        <div className="card fade-in-3">
+          <div className="stat-label">ACTIVE AGENTS</div>
+          <div style={{ 
+            fontFamily: 'var(--font-mono)', 
+            fontSize: 28, 
+            fontWeight: 900, 
+            color: '#9945FF'
+          }}>
+            {stats.agents_active}
+          </div>
+        </div>
+
+        <div className="card fade-in-3">
+          <div className="stat-label">TOTAL CYCLES</div>
+          <div style={{ 
+            fontFamily: 'var(--font-mono)', 
+            fontSize: 28, 
+            fontWeight: 900, 
+            color: '#9945FF'
+          }}>
+            {stats.cycles_completed}
+          </div>
+        </div>
+      </div>
+
+      {/* Agent Phase Breakdown */}
+      {agentStatus && agentStatus.phase_breakdown && (
+        <div className="card fade-in-4" style={{ marginBottom: 24 }}>
+          <p className="section-label" style={{ marginBottom: 16 }}>AGENT PHASE DISTRIBUTION</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+            {Object.entries(agentStatus.phase_breakdown).map(([phase, data]) => (
+              <div key={phase} style={{ textAlign: 'center' }}>
+                <div style={{ 
+                  fontSize: 24, 
+                  fontWeight: 900, 
+                  color: '#14F195',
+                  marginBottom: 4
+                }}>
+                  {data.active_agents}
+                </div>
+                <div style={{ 
+                  fontSize: 10, 
+                  fontWeight: 700, 
+                  letterSpacing: '0.1em', 
+                  color: '#3a5070',
+                  textTransform: 'uppercase'
+                }}>
+                  {phase}
+                </div>
+                <div style={{ fontSize: 9, color: '#3a5070', marginTop: 4 }}>
+                  {data.total_cycles} cycles
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Live Events Feed */}
+      <div className="card fade-in-5" style={{ marginBottom: 24 }}>
+        <p className="section-label" style={{ marginBottom: 12 }}>LIVE EVENTS</p>
+        <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+          {events.length === 0 ? (
+            <p style={{ color: '#3a5070', fontSize: 13, margin: 0 }}>
+              Waiting for events...
+            </p>
+          ) : (
+            events.map((evt, idx) => (
+              <div 
+                key={idx} 
+                style={{ 
+                  padding: '8px 12px',
+                  background: 'rgba(153,69,255,0.03)',
+                  borderRadius: 4,
+                  marginBottom: 8,
+                  fontSize: 12,
+                  fontFamily: 'var(--font-mono)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}
+              >
+                <span style={{ color: '#e8f0ff' }}>{evt.message}</span>
+                <span style={{ color: '#3a5070', fontSize: 10 }}>{evt.time}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Visual Elements */}
+      <div className="card fade-in-6" style={{ marginBottom: 16, padding: 0, overflow: 'hidden' }}>
+        <canvas ref={canvasRef} style={{ width: '100%', height: 72, display: 'block' }} />
+      </div>
+
+      <div className="card fade-in-7" style={{ padding: 0, overflow: 'hidden' }}>
+        <canvas ref={neuralRef} style={{ width: '100%', height: 200, display: 'block' }} />
       </div>
     </div>
   );
