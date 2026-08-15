@@ -844,6 +844,147 @@ async def agents_phase_status(phase: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Health / API Monitoring
+
+@api_router.get("/health/details")
+@limiter.limit("30/minute")
+async def health_details(request: Request):
+    """Return detailed health metrics for all backend integrations."""
+    health_status = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "services": []
+    }
+    
+    # MongoDB check
+    try:
+        start = time.time()
+        await db_mongo.list_collection_names()
+        latency_ms = int((time.time() - start) * 1000)
+        health_status["services"].append({
+            "id": "mongodb",
+            "name": "MongoDB",
+            "category": "Database",
+            "status": "live",
+            "latency": latency_ms,
+            "url": "Internal MongoDB"
+        })
+    except Exception as e:
+        health_status["services"].append({
+            "id": "mongodb",
+            "name": "MongoDB",
+            "category": "Database",
+            "status": "error",
+            "latency": 0,
+            "error": str(e),
+            "url": "Internal MongoDB"
+        })
+    
+    # Solana RPC check
+    try:
+        start = time.time()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                SOLANA_RPC,
+                json={"jsonrpc": "2.0", "id": 1, "method": "getHealth"}
+            )
+        latency_ms = int((time.time() - start) * 1000)
+        health_status["services"].append({
+            "id": "sol-rpc",
+            "name": "Solana RPC",
+            "category": "Chain",
+            "status": "live" if resp.status_code == 200 else "error",
+            "latency": latency_ms,
+            "url": SOLANA_RPC
+        })
+    except Exception as e:
+        health_status["services"].append({
+            "id": "sol-rpc",
+            "name": "Solana RPC",
+            "category": "Chain",
+            "status": "error",
+            "latency": 0,
+            "error": str(e),
+            "url": SOLANA_RPC
+        })
+    
+    # Jupiter check
+    try:
+        start = time.time()
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Just check if Jupiter API is reachable
+            resp = await client.get("https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=1000000")
+        latency_ms = int((time.time() - start) * 1000)
+        health_status["services"].append({
+            "id": "jup",
+            "name": "Jupiter Price",
+            "category": "DEX",
+            "status": "live" if resp.status_code == 200 else "error",
+            "latency": latency_ms,
+            "url": "quote-api.jup.ag"
+        })
+    except Exception as e:
+        health_status["services"].append({
+            "id": "jup",
+            "name": "Jupiter Price",
+            "category": "DEX",
+            "status": "error",
+            "latency": 0,
+            "error": str(e),
+            "url": "quote-api.jup.ag"
+        })
+    
+    # Revenue system check
+    try:
+        start = time.time()
+        # Revenue system doesn't have get_status(), check if it's initialized instead
+        status_data = revenue_system.ledger.summary()
+        latency_ms = int((time.time() - start) * 1000)
+        health_status["services"].append({
+            "id": "revenue",
+            "name": "Revenue System",
+            "category": "Internal",
+            "status": "live",
+            "latency": latency_ms,
+            "url": f"${status_data.get('real_income', 0):.2f} real income"
+        })
+    except Exception as e:
+        health_status["services"].append({
+            "id": "revenue",
+            "name": "Revenue System",
+            "category": "Internal",
+            "status": "error",
+            "latency": 0,
+            "error": str(e),
+            "url": "Internal Revenue System"
+        })
+    
+    # Agent pool check
+    try:
+        start = time.time()
+        agent_status = agent_pool.get_status()
+        latency_ms = int((time.time() - start) * 1000)
+        health_status["services"].append({
+            "id": "agents",
+            "name": "Agent Pool",
+            "category": "Internal",
+            "status": "live",
+            "latency": latency_ms,
+            "url": f"{agent_status['total_agents']} agents active"
+        })
+    except Exception as e:
+        health_status["services"].append({
+            "id": "agents",
+            "name": "Agent Pool",
+            "category": "Internal",
+            "status": "error",
+            "latency": 0,
+            "error": str(e),
+            "url": "Internal Agent Pool"
+        })
+    
+    return JSONResponse(content=health_status)
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 @api_router.get("/")
 async def root():

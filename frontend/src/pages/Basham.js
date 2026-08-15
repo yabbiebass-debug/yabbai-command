@@ -65,13 +65,56 @@ export default function Basham() {
 
   const runAudit = async () => {
     setAuditRunning(true);
-    await new Promise(r => setTimeout(r, 2200));
-    const score = Math.round(42 + Math.random() * 45);
+    await new Promise(r => setTimeout(r, 2200)); // UX timing delay only
+    
+    // Calculate score based on REAL user answers (not random)
+    const score = calculateWealthScore(answers);
+    
     setWealthScore(score);
     setWealthMap(true);
     setMapText(generateWealthMap(score, answers));
     setAuditRunning(false);
     setTab('map');
+  };
+
+  // Real scoring algorithm based on user inputs
+  const calculateWealthScore = (ans) => {
+    let score = 30; // Base score
+    
+    // MRR factor (answer 0)
+    const mrr = parseFloat(ans[0]?.replace(/[^0-9.]/g, '') || '0');
+    if (mrr > 50000) score += 25;
+    else if (mrr > 20000) score += 20;
+    else if (mrr > 10000) score += 15;
+    else if (mrr > 5000) score += 10;
+    else if (mrr > 0) score += 5;
+    
+    // Passive revenue percentage (answer 1)
+    const passiveMatch = ans[1]?.match(/(\d+)/);
+    const passivePct = passiveMatch ? parseInt(passiveMatch[0]) : 0;
+    if (passivePct > 50) score += 20;
+    else if (passivePct > 30) score += 15;
+    else if (passivePct > 15) score += 10;
+    else if (passivePct > 0) score += 5;
+    
+    // Automation systems (answer 3)
+    const automationAnswer = ans[3]?.toLowerCase() || '';
+    if (automationAnswer.includes('all') || automationAnswer.includes('most')) score += 15;
+    else if (automationAnswer.includes('some') || automationAnswer.includes('few')) score += 10;
+    else if (automationAnswer.includes('none') || automationAnswer.includes('manual')) score += 0;
+    else if (automationAnswer.length > 20) score += 8; // Detailed answer suggests awareness
+    
+    // Target vs current (answers 0 and 4)
+    const target = parseFloat(ans[4]?.replace(/[^0-9.]/g, '') || '0');
+    const currentAnnual = mrr * 12;
+    if (target > 0 && currentAnnual > 0) {
+      const gap = target / currentAnnual;
+      if (gap < 1.5) score += 10; // Close to target
+      else if (gap < 3) score += 7;
+      else if (gap < 5) score += 5;
+    }
+    
+    return Math.min(Math.max(score, 0), 100); // Clamp to 0-100
   };
 
   const generateWealthMap = (score, ans) => {

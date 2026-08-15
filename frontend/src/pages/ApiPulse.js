@@ -1,28 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const API_ENDPOINTS = [
-  { id: 'jup', name: 'Jupiter Price', category: 'DEX', url: 'api.jup.ag' },
-  { id: 'sol-rpc', name: 'Solana RPC', category: 'Chain', url: 'rpc.mainnet-beta' },
-  { id: 'sol-ws', name: 'Solana WS', category: 'Chain', url: 'ws.mainnet-beta' },
-  { id: 'pyth', name: 'Pyth Oracle', category: 'Oracle', url: 'hermes.pyth.network' },
-  { id: 'coingecko', name: 'CoinGecko', category: 'Price', url: 'api.coingecko.com' },
-  { id: 'birdeye', name: 'Birdeye', category: 'Analytics', url: 'public-api.birdeye.so' },
-  { id: 'raydium', name: 'Raydium AMM', category: 'DEX', url: 'api.raydium.io' },
-  { id: 'orca', name: 'Orca Whirlpool', category: 'DEX', url: 'api.orca.so' },
-  { id: 'meteora', name: 'Meteora DLMM', category: 'DEX', url: 'dlmm-api.meteora.ag' },
-  { id: 'pump', name: 'pump.fun', category: 'Launch', url: 'pump.fun' },
-  { id: 'paypal', name: 'PayPal REST', category: 'Payment', url: 'api.paypal.com' },
-  { id: 'pp-sdk', name: 'PayPal SDK', category: 'Payment', url: 'sdk.paypal.com' },
-  { id: 'stripe', name: 'Stripe API', category: 'Payment', url: 'api.stripe.com' },
-  { id: 'coinbase', name: 'Coinbase API', category: 'Payment', url: 'api.coinbase.com' },
-  { id: 'arweave', name: 'Arweave Upload', category: 'Storage', url: 'arweave.net' },
-  { id: 'ipfs', name: 'IPFS/Pinata', category: 'Storage', url: 'api.pinata.cloud' },
-  { id: 'helius', name: 'Helius Enhanced', category: 'Chain', url: 'mainnet.helius-rpc.com' },
-  { id: 'quicknode', name: 'QuickNode', category: 'Chain', url: 'quicknode.pro' },
-  { id: 'supabase', name: 'Supabase DB', category: 'Database', url: 'supabase.co' },
-  { id: 'yabbai-api', name: 'YABBAI API', category: 'Internal', url: 'api.yabbai.io' },
-];
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
 
+// Waveform visualization - VISUAL ONLY, not a metric
 const WaveformCanvas = ({ cascadeMode }) => {
   const canvasRef = useRef(null);
   const frameRef = useRef(0);
@@ -34,6 +15,8 @@ const WaveformCanvas = ({ cascadeMode }) => {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     let raf;
+    
+    // Visual-only waveform animation (not displaying fake metrics)
     const draw = () => {
       const W = canvas.width = canvas.offsetWidth;
       const H = canvas.height = 80;
@@ -74,57 +57,82 @@ const WaveformCanvas = ({ cascadeMode }) => {
 };
 
 export default function ApiPulse() {
-  const [apis, setApis] = useState(() =>
-    API_ENDPOINTS.map(a => ({
-      ...a,
-      status: Math.random() > 0.15 ? 'live' : 'error',
-      latency: Math.floor(Math.random() * 200 + 20),
-      calls: Math.floor(Math.random() * 5000 + 500),
-      pulsing: false,
-    }))
-  );
+  const [apis, setApis] = useState([]);
   const [cascadeMode, setCascadeMode] = useState(false);
-  const [totalCalls, setTotalCalls] = useState(24441);
-  const [avgLatency, setAvgLatency] = useState(47);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [lastUpdate, setLastUpdate] = useState(null);
 
+  // Fetch REAL health data from backend
   useEffect(() => {
-    const tick = setInterval(() => {
-      const idx = Math.floor(Math.random() * apis.length);
-      setApis(prev => prev.map((a, i) => {
-        if (i !== idx) return a;
-        const newLat = Math.max(10, a.latency + Math.floor((Math.random() - 0.5) * 40));
-        return {
-          ...a,
-          latency: newLat,
-          calls: a.calls + Math.floor(Math.random() * 15),
-          pulsing: true,
-          status: Math.random() > 0.05 ? 'live' : 'error',
-        };
-      }));
-      setTotalCalls(c => c + Math.floor(Math.random() * 20 + 5));
-      setAvgLatency(l => Math.max(10, l + Math.floor((Math.random() - 0.5) * 10)));
-      setTimeout(() => setApis(prev => prev.map((a, i) => i === idx ? { ...a, pulsing: false } : a)), 700);
-    }, cascadeMode ? 300 : 1200);
-    return () => clearInterval(tick);
-  }, [apis.length, cascadeMode]);
+    const loadHealthData = async () => {
+      try {
+        const response = await fetch(`${API}/health/details`);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        
+        // Transform backend data to match display format
+        setApis(data.services.map(service => ({
+          id: service.id,
+          name: service.name,
+          category: service.category,
+          url: service.url,
+          status: service.status,
+          latency: service.latency || 0,
+          error: service.error || null,
+          pulsing: false,
+        })));
+        
+        setLastUpdate(new Date(data.timestamp));
+        setError(null);
+        setLoading(false);
+      } catch (e) {
+        console.error('Failed to load API health data:', e);
+        setError(e.message);
+        setLoading(false);
+      }
+    };
+
+    loadHealthData();
+    // Refresh every 10 seconds
+    const interval = setInterval(loadHealthData, 10000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   const liveCount = apis.filter(a => a.status === 'live').length;
+  const avgLatency = apis.length > 0 
+    ? Math.round(apis.reduce((sum, a) => sum + a.latency, 0) / apis.length)
+    : 0;
 
   return (
     <div className="page-container fade-in">
       <p className="section-label fade-in-1">⚡ API PULSE</p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
         <h1 className="font-display fade-in-2" style={{ fontSize: 36, fontWeight: 900, color: '#9945FF' }}>API PULSE</h1>
-        <span className="badge badge-green">{liveCount}/{apis.length} LIVE</span>
-        {cascadeMode && <span className="badge badge-amber">CASCADE MODE</span>}
+        {!loading && !error && (
+          <>
+            <span className="badge badge-green" data-testid="api-pulse-live-count">
+              {liveCount}/{apis.length} LIVE
+            </span>
+            {cascadeMode && <span className="badge badge-amber">CASCADE MODE</span>}
+          </>
+        )}
+        {error && (
+          <span className="badge" style={{ background: 'rgba(255,96,96,0.2)', color: '#ff6060' }}>
+            CONNECTION ERROR
+          </span>
+        )}
       </div>
 
-      {/* Waveform */}
+      {/* Waveform - VISUAL ONLY, not displaying metrics */}
       <div className="card fade-in-2" style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span className="live-dot" />
-            <span className="section-label" style={{ margin: 0 }}>PULSE WAVEFORM</span>
+            <span className={`live-dot ${error ? '' : ''}`} style={error ? { background: '#ff6060' } : {}} />
+            <span className="section-label" style={{ margin: 0 }}>PULSE WAVEFORM (Visual Only)</span>
           </div>
           <label className="toggle-row" style={{ cursor: 'pointer' }}>
             <span className="toggle">
@@ -135,47 +143,91 @@ export default function ApiPulse() {
           </label>
         </div>
         <WaveformCanvas cascadeMode={cascadeMode} />
-        <div className="grid-4" style={{ marginTop: 12 }}>
-          {[
-            { l: 'TOTAL CALLS', v: totalCalls.toLocaleString(), c: '#e8f0ff' },
-            { l: 'AVG LATENCY', v: `${avgLatency}ms`, c: '#9945FF' },
-            { l: 'LIVE ENDPOINTS', v: `${liveCount}/${apis.length}`, c: '#14F195' },
-            { l: 'SUCCESS RATE', v: `${((liveCount / apis.length) * 100).toFixed(1)}%`, c: '#14F195' },
-          ].map(({ l, v, c }) => (
-            <div key={l}>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 900, color: c }}>{v}</div>
-              <div className="stat-label">{l}</div>
+        
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '20px', color: '#3a5070' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>Loading health data...</div>
+          </div>
+        ) : error ? (
+          <div style={{ textAlign: 'center', padding: '20px', color: '#ff6060' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, marginBottom: 8 }}>Failed to load API health</div>
+            <div style={{ fontSize: 11, color: '#3a5070' }}>{error}</div>
+          </div>
+        ) : (
+          <div className="grid-4" style={{ marginTop: 12 }}>
+            {[
+              { l: 'MONITORED APIS', v: apis.length.toString(), c: '#e8f0ff' },
+              { l: 'AVG LATENCY', v: avgLatency > 0 ? `${avgLatency}ms` : 'N/A', c: '#9945FF' },
+              { l: 'LIVE ENDPOINTS', v: `${liveCount}/${apis.length}`, c: '#14F195' },
+              { l: 'SUCCESS RATE', v: apis.length > 0 ? `${((liveCount / apis.length) * 100).toFixed(1)}%` : 'N/A', c: '#14F195' },
+            ].map(({ l, v, c }) => (
+              <div key={l}>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 900, color: c }}>{v}</div>
+                <div className="stat-label">{l}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {lastUpdate && (
+          <div style={{ marginTop: 12, textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070' }}>
+            Last updated: {lastUpdate.toLocaleTimeString()}
+          </div>
+        )}
+      </div>
+
+      {/* API Cards - REAL DATA ONLY */}
+      {!loading && !error && (
+        <div className="grid-4 fade-in-3">
+          {apis.map(api => (
+            <div key={api.id} className="api-card" data-testid={`api-card-${api.id}`}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                <div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontSize: 12, color: '#e8f0ff', marginBottom: 2 }}>{api.name}</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070' }}>{api.category}</div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+                  <span className={`badge ${api.status === 'live' ? 'badge-green' : 'badge-red'}`}>{api.status}</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: api.latency < 100 ? '#14F195' : api.latency < 200 ? '#F5A623' : '#ff6060' }}>
+                  {api.latency > 0 ? `${api.latency}ms` : 'N/A'}
+                </span>
+                {api.error && (
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#ff6060' }}>Error</span>
+                )}
+              </div>
+              <div className="api-latency-bar">
+                <div className="api-latency-fill" style={{ width: api.latency > 0 ? `${Math.min((api.latency / 300) * 100, 100)}%` : '0%', background: api.latency < 100 ? '#14F195' : api.latency < 200 ? '#F5A623' : '#ff6060' }} />
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: '#2a3a50', marginTop: 4 }} title={api.url}>
+                {api.url.length > 30 ? api.url.substring(0, 30) + '...' : api.url}
+              </div>
+              {api.error && (
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: '#ff6060', marginTop: 4 }}>
+                  {api.error.length > 40 ? api.error.substring(0, 40) + '...' : api.error}
+                </div>
+              )}
             </div>
           ))}
         </div>
-      </div>
+      )}
 
-      {/* API Cards */}
-      <div className="grid-4 fade-in-3">
-        {apis.map(api => (
-          <div key={api.id} className={`api-card ${api.pulsing ? 'pulsing' : ''}`}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-              <div>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: 12, color: '#e8f0ff', marginBottom: 2 }}>{api.name}</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070' }}>{api.category}</div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-                <span className={`badge ${api.status === 'live' ? 'badge-green' : 'badge-red'}`}>{api.status}</span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: api.latency < 100 ? '#14F195' : api.latency < 200 ? '#F5A623' : '#ff6060' }}>
-                {api.latency}ms
-              </span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070' }}>{api.calls.toLocaleString()} calls</span>
-            </div>
-            <div className="api-latency-bar">
-              <div className="api-latency-fill" style={{ width: `${Math.min((api.latency / 300) * 100, 100)}%`, background: api.latency < 100 ? '#14F195' : api.latency < 200 ? '#F5A623' : '#ff6060' }} />
-            </div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: '#2a3a50', marginTop: 4 }}>{api.url}</div>
+      {!loading && error && (
+        <div style={{ textAlign: 'center', padding: '40px', color: '#3a5070' }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>📡</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: '#ff6060', marginBottom: 8 }}>
+            DATA GAP
           </div>
-        ))}
-      </div>
+          <div style={{ fontSize: 12, marginBottom: 16 }}>
+            Unable to fetch API health metrics from backend
+          </div>
+          <div style={{ fontSize: 11, color: '#3a5070' }}>
+            Error: {error}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

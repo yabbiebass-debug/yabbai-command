@@ -1,31 +1,15 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '../context/ToastContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-const OHLCV_CANDLES = 60;
-function genCandle(prev, i) {
-  const open = prev ? prev.close : 0.002441;
-  const change = (Math.random() - 0.46) * open * 0.035;
-  const close = Math.max(open + change, 0.0000001);
-  const high = Math.max(open, close) * (1 + Math.random() * 0.015);
-  const low = Math.min(open, close) * (1 - Math.random() * 0.015);
-  const vol = Math.random() * 80000 + 10000;
-  const ts = Date.now() - (OHLCV_CANDLES - i) * 300000;
-  return { open, close, high, low, vol, ts };
-}
-function seedCandles() {
-  const candles = [];
-  for (let i = 0; i < OHLCV_CANDLES; i++) candles.push(genCandle(candles[i - 1], i));
-  return candles;
-}
-
-const ChartCanvas = ({ candles }) => {
+const ChartCanvas = ({ priceHistory }) => {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !candles.length) return;
+    if (!canvas || !priceHistory || priceHistory.length === 0) return;
+    
     const ctx = canvas.getContext('2d');
     const W = canvas.width = canvas.offsetWidth;
     const H = canvas.height = canvas.offsetHeight || 220;
@@ -33,7 +17,7 @@ const ChartCanvas = ({ candles }) => {
     ctx.fillStyle = 'rgba(6,14,32,0.85)';
     ctx.fillRect(0, 0, W, H);
 
-    const prices = candles.map(c => c.close);
+    const prices = priceHistory.map(p => p.price);
     const minP = Math.min(...prices) * 0.995;
     const maxP = Math.max(...prices) * 1.005;
     const toY = p => H - ((p - minP) / (maxP - minP)) * (H - 20) - 10;
@@ -43,9 +27,9 @@ const ChartCanvas = ({ candles }) => {
     grad.addColorStop(0, 'rgba(20,241,149,0.2)');
     grad.addColorStop(1, 'rgba(20,241,149,0)');
     ctx.beginPath();
-    candles.forEach((c, i) => {
-      const x = (i / (candles.length - 1)) * W;
-      i === 0 ? ctx.moveTo(x, toY(c.close)) : ctx.lineTo(x, toY(c.close));
+    priceHistory.forEach((p, i) => {
+      const x = (i / (priceHistory.length - 1)) * W;
+      i === 0 ? ctx.moveTo(x, toY(p.price)) : ctx.lineTo(x, toY(p.price));
     });
     ctx.lineTo(W, H);
     ctx.lineTo(0, H);
@@ -59,30 +43,28 @@ const ChartCanvas = ({ candles }) => {
     ctx.lineWidth = 2;
     ctx.shadowColor = '#14F195';
     ctx.shadowBlur = 10;
-    candles.forEach((c, i) => {
-      const x = (i / (candles.length - 1)) * W;
-      i === 0 ? ctx.moveTo(x, toY(c.close)) : ctx.lineTo(x, toY(c.close));
+    priceHistory.forEach((p, i) => {
+      const x = (i / (priceHistory.length - 1)) * W;
+      i === 0 ? ctx.moveTo(x, toY(p.price)) : ctx.lineTo(x, toY(p.price));
     });
     ctx.stroke();
     ctx.shadowBlur = 0;
 
     // Price label
-    const last = candles[candles.length - 1];
+    const last = priceHistory[priceHistory.length - 1];
     const lastX = W;
-    const lastY = toY(last.close);
+    const lastY = toY(last.price);
     ctx.fillStyle = 'rgba(20,241,149,0.9)';
     ctx.font = '600 10px JetBrains Mono';
-    ctx.fillText(`$${last.close.toFixed(6)}`, lastX - 80, lastY - 5);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    // Canvas re-draws when candles prop changes - other variables are scoped within effect
-  }, [candles]);
+    ctx.fillText(`$${last.price.toFixed(6)}`, lastX - 80, lastY - 5);
+  }, [priceHistory]);
 
   return <canvas ref={canvasRef} style={{ width: '100%', height: 220, borderRadius: 6 }} />;
 };
 
 export default function YabbaiApp() {
   const { error: toastError } = useToast();
-  const [candles, setCandles] = useState(seedCandles);
+  const [priceHistory, setPriceHistory] = useState([]);
   const [price, setPrice] = useState(null);
   const [mintCfg, setMintCfg] = useState(null);
   const [swapFrom, setSwapFrom] = useState('USDC');
@@ -92,8 +74,10 @@ export default function YabbaiApp() {
   const [slippage, setSlippage] = useState(0.5);
   const [aiConfig, setAiConfig] = useState({ autonomy: 75, risk: 40, reinvest: 60 });
   const [toggles, setToggles] = useState({ selfImprove: true, autoReinvest: true });
+  const [loading, setLoading] = useState(true);
   const mintRef = useRef(null);
 
+  // Load token mint config
   useEffect(() => {
     fetch(`${API}/token-mint`)
       .then(r => {
@@ -103,10 +87,49 @@ export default function YabbaiApp() {
         }
         return r.json();
       })
-      .then(d => { if (d.configured) { setMintCfg(d); mintRef.current = d.mint; } })
-      .catch((e) => console.error('Failed to load token mint:', e));
-  }, [API, toastError]);
+      .then(d => { 
+        if (d.configured) { 
+          setMintCfg(d); 
+          mintRef.current = d.mint; 
+        }
+        setLoading(false);
+      })
+      .catch((e) => {
+        console.error('Failed to load token mint:', e);
+        setLoading(false);
+      });
+  }, [toastError]);
 
+  // Load price history when token is configured
+  useEffect(() => {
+    if (!mintRef.current) return;
+    
+    const loadPriceHistory = () => {
+      fetch(`${API}/price-history?mint=${mintRef.current}&limit=60`)
+        .then(r => {
+          if (r.status === 429) {
+            toastError('Price history rate limited - retrying shortly');
+            throw new Error('Rate limited');
+          }
+          return r.json();
+        })
+        .then(data => {
+          if (data && data.length > 0) {
+            setPriceHistory(data);
+            // Set current price to latest from history
+            setPrice(data[data.length - 1]?.price || null);
+          }
+        })
+        .catch((e) => console.error('Price history fetch failed:', e));
+    };
+
+    loadPriceHistory();
+    const historyInterval = setInterval(loadPriceHistory, 30000); // Refresh every 30s
+    
+    return () => clearInterval(historyInterval);
+  }, [mintCfg, toastError]);
+
+  // Poll live price when token is configured
   useEffect(() => {
     if (!mintRef.current) return;
     const poll = () => {
@@ -124,20 +147,13 @@ export default function YabbaiApp() {
     poll();
     const id = setInterval(poll, 15000);
     return () => clearInterval(id);
-  }, [mintCfg, API, toastError]);
-
-  useEffect(() => {
-    const tick = setInterval(() => {
-      setCandles(prev => {
-        const last = prev[prev.length - 1];
-        const next = genCandle(last, prev.length);
-        return [...prev.slice(-OHLCV_CANDLES + 1), next];
-      });
-    }, 5000);
-    return () => clearInterval(tick);
-  }, []);
+  }, [mintCfg, toastError]);
 
   const handleSweep = async () => {
+    if (!mintCfg?.configured) {
+      toastError('Configure token mint in Settings first');
+      return;
+    }
     setSweeping(true);
     await new Promise(r => setTimeout(r, 1800));
     setSweeping(false);
@@ -145,20 +161,57 @@ export default function YabbaiApp() {
     setTimeout(() => setSweepDone(false), 3000);
   };
 
-  const currentPrice = price ?? candles[candles.length - 1]?.close ?? 0.002441;
-  const swapOut = swapAmt ? (parseFloat(swapAmt) / currentPrice).toFixed(2) : '';
+  // Use real price or null (no fallback mock price)
+  const currentPrice = price;
+  const swapOut = swapAmt && currentPrice ? (parseFloat(swapAmt) / currentPrice).toFixed(2) : '';
 
   return (
     <div className="page-container fade-in">
+      {/* SIMULATION MODE BANNER - Only shown when token is not configured */}
+      {!loading && !mintCfg?.configured && (
+        <div 
+          data-testid="token-simulation-mode-banner"
+          style={{
+            background: 'linear-gradient(135deg, rgba(245,166,35,0.15) 0%, rgba(245,166,35,0.05) 100%)',
+            border: '1px solid rgba(245,166,35,0.3)',
+            borderRadius: 8,
+            padding: '16px 20px',
+            marginBottom: 24,
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 12,
+          }}
+        >
+          <div style={{ fontSize: 20, lineHeight: 1 }}>⚠️</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: '#F5A623', marginBottom: 4 }}>
+              SIMULATION MODE
+            </div>
+            <div style={{ fontSize: 13, color: '#e8f0ff', lineHeight: 1.5 }}>
+              This token data is simulated for demonstration.
+              Configure a real SPL token in Settings to show live market data.
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ marginBottom: 24 }}>
         <p className="section-label fade-in-1">⚡ YABBAI TOKEN</p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <h1 className="font-display fade-in-2" style={{ fontSize: 36, fontWeight: 900, color: '#9945FF' }}>YABBAI</h1>
-          <span className="badge badge-green fade-in-2">LIVE</span>
-          {mintCfg && <span className="badge badge-purple fade-in-2">{mintCfg.network}</span>}
+          <h1 className="font-display fade-in-2" style={{ fontSize: 36, fontWeight: 900, color: '#9945FF' }}>
+            {mintCfg?.configured ? (mintCfg.mint.substring(0, 4) + '...' + mintCfg.mint.substring(mintCfg.mint.length - 4)) : 'NOT CONFIGURED'}
+          </h1>
+          {mintCfg?.configured ? (
+            <>
+              <span className="badge badge-green fade-in-2">LIVE</span>
+              <span className="badge badge-purple fade-in-2">{mintCfg.network}</span>
+            </>
+          ) : (
+            <span className="badge" style={{ background: 'rgba(58,80,112,0.3)', color: '#3a5070' }}>NOT CONNECTED</span>
+          )}
         </div>
-        <div className="font-mono fade-in-3" style={{ fontSize: 32, fontWeight: 900, color: '#14F195', marginTop: 4 }}>
-          ${currentPrice.toFixed(6)}
+        <div className="font-mono fade-in-3" style={{ fontSize: 32, fontWeight: 900, color: currentPrice ? '#14F195' : '#3a5070', marginTop: 4 }}>
+          {currentPrice ? `$${currentPrice.toFixed(6)}` : 'DATA GAP'}
           <span style={{ fontSize: 12, color: '#3a5070', marginLeft: 10 }}>USDC</span>
         </div>
       </div>
@@ -167,27 +220,61 @@ export default function YabbaiApp() {
         {/* Chart */}
         <div className="card card-green-glow" style={{ gridColumn: '1 / -1' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <span className="section-label" style={{ margin: 0 }}>OHLCV CHART</span>
+            <span className="section-label" style={{ margin: 0 }}>PRICE HISTORY</span>
             <div style={{ display: 'flex', gap: 6 }}>
               {['5m', '15m', '1h', '4h'].map(tf => (
-                <button key={tf} className="btn btn-outline btn-sm">{tf}</button>
+                <button key={tf} className="btn btn-outline btn-sm" disabled={!mintCfg?.configured}>{tf}</button>
               ))}
             </div>
           </div>
-          <ChartCanvas candles={candles} />
-          <div className="grid-4" style={{ marginTop: 14 }}>
-            {[
-              { l: 'OPEN', v: `$${candles[candles.length-1]?.open.toFixed(6)}` },
-              { l: 'HIGH', v: `$${candles[candles.length-1]?.high.toFixed(6)}` },
-              { l: 'LOW', v: `$${candles[candles.length-1]?.low.toFixed(6)}` },
-              { l: 'VOLUME', v: candles[candles.length-1]?.vol.toLocaleString(undefined, { maximumFractionDigits: 0 }) },
-            ].map(({ l, v }) => (
-              <div key={l}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: '#e8f0ff' }}>{v}</div>
-                <div className="stat-label">{l}</div>
+          
+          {!mintCfg?.configured ? (
+            <div style={{ 
+              height: 220, 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              background: 'rgba(6,14,32,0.85)',
+              borderRadius: 6,
+              border: '1px dashed rgba(58,80,112,0.3)'
+            }}>
+              <div style={{ textAlign: 'center', color: '#3a5070' }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700 }}>NO DATA AVAILABLE</div>
+                <div style={{ fontSize: 11, marginTop: 4 }}>Configure token mint in Settings</div>
               </div>
-            ))}
-          </div>
+            </div>
+          ) : priceHistory.length === 0 ? (
+            <div style={{ 
+              height: 220, 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              background: 'rgba(6,14,32,0.85)',
+              borderRadius: 6
+            }}>
+              <div style={{ textAlign: 'center', color: '#3a5070' }}>
+                <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)' }}>Loading price history...</div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <ChartCanvas priceHistory={priceHistory} />
+              <div className="grid-4" style={{ marginTop: 14 }}>
+                {priceHistory.length > 0 && [
+                  { l: 'CURRENT', v: `$${priceHistory[priceHistory.length-1]?.price.toFixed(6)}` },
+                  { l: 'HIGH', v: `$${Math.max(...priceHistory.map(p => p.price)).toFixed(6)}` },
+                  { l: 'LOW', v: `$${Math.min(...priceHistory.map(p => p.price)).toFixed(6)}` },
+                  { l: 'POINTS', v: priceHistory.length },
+                ].map(({ l, v }) => (
+                  <div key={l}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: '#e8f0ff' }}>{v}</div>
+                    <div className="stat-label">{l}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -196,11 +283,12 @@ export default function YabbaiApp() {
         <div className="card">
           <p className="section-label" style={{ marginBottom: 14 }}>JUPITER SWAP</p>
           <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-            {['USDC → YABBAI', 'YABBAI → USDC'].map(label => (
+            {['USDC → TOKEN', 'TOKEN → USDC'].map(label => (
               <button
                 key={label}
                 className={`btn btn-sm ${swapFrom === label.split(' ')[0] ? 'btn-primary' : 'btn-outline'}`}
                 onClick={() => setSwapFrom(label.split(' ')[0])}
+                disabled={!mintCfg?.configured}
               >{label}</button>
             ))}
           </div>
@@ -213,6 +301,7 @@ export default function YabbaiApp() {
                 value={swapAmt}
                 onChange={e => setSwapAmt(e.target.value)}
                 type="number"
+                disabled={!mintCfg?.configured}
               />
               <span className="badge badge-purple" style={{ alignSelf: 'center', whiteSpace: 'nowrap' }}>
                 {swapFrom}
@@ -222,9 +311,9 @@ export default function YabbaiApp() {
           <div style={{ marginBottom: 14 }}>
             <label className="stat-label" style={{ display: 'block', marginBottom: 5 }}>YOU RECEIVE</label>
             <div style={{ display: 'flex', gap: 8 }}>
-              <input className="field" value={swapOut} readOnly placeholder="0.00" />
+              <input className="field" value={swapOut} readOnly placeholder="0.00" disabled={!mintCfg?.configured} />
               <span className="badge badge-green" style={{ alignSelf: 'center', whiteSpace: 'nowrap' }}>
-                {swapFrom === 'USDC' ? 'YABBAI' : 'USDC'}
+                {swapFrom === 'USDC' ? 'TOKEN' : 'USDC'}
               </span>
             </div>
           </div>
@@ -235,16 +324,21 @@ export default function YabbaiApp() {
                 key={s}
                 className={`btn btn-sm ${slippage === s ? 'btn-primary' : 'btn-outline'}`}
                 onClick={() => setSlippage(s)}
+                disabled={!mintCfg?.configured}
               >{s}%</button>
             ))}
           </div>
-          <button className="btn btn-green" style={{ width: '100%' }}>Swap via Jupiter</button>
-          <div style={{ marginTop: 10, fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070' }}>
-            Rate: 1 USDC = {(1 / currentPrice).toFixed(2)} YABBAI • Fee: 0.35%
-          </div>
+          <button className="btn btn-green" style={{ width: '100%' }} disabled={!mintCfg?.configured || !currentPrice}>
+            {mintCfg?.configured ? 'Swap via Jupiter' : 'Configure Token First'}
+          </button>
+          {currentPrice && (
+            <div style={{ marginTop: 10, fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070' }}>
+              Rate: 1 USDC = {(1 / currentPrice).toFixed(2)} TOKEN • Fee: 0.35%
+            </div>
+          )}
         </div>
 
-        {/* Mission Phase + Sweep */}
+        {/* Mission Phase - REAL DATA ONLY (Remove fake yield) */}
         <div className="card">
           <p className="section-label" style={{ marginBottom: 14 }}>MISSION PHASE</p>
           {[{ phase: 'PUMP', status: 'COMPLETE', pct: 100, col: '#14F195' },
@@ -264,29 +358,17 @@ export default function YabbaiApp() {
             </div>
           ))}
           <div className="divider" />
-          {/* Sweep button */}
+          {/* Note: Yield tracking would come from real revenue backend integration */}
           <div style={{ textAlign: 'center' }}>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070', marginBottom: 12 }}>
-              ACCUMULATED YIELD: <span style={{ color: '#14F195', fontWeight: 700 }}>$847.33</span>
+              Connect revenue streams in Settings to track yields
             </p>
             <button
-              className={`btn ${sweepDone ? 'btn-green' : 'btn-primary'}`}
-              style={{
-                width: '100%', fontSize: 13, padding: '14px',
-                boxShadow: sweepDone ? '0 0 30px rgba(20,241,149,0.5)' : '0 0 20px rgba(153,69,255,0.3)',
-                transition: 'all 0.3s',
-              }}
-              onClick={handleSweep}
-              disabled={sweeping}
-              data-testid="sweep-btn"
+              className="btn btn-outline"
+              style={{ width: '100%', fontSize: 13, padding: '14px' }}
+              disabled={true}
             >
-              {sweeping ? (
-                <><span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginRight: 8 }} />SWEEPING...</>
-              ) : sweepDone ? (
-                <>✔ YIELDS SWEPT TO TREASURY</>
-              ) : (
-                <>⚡ SWEEP ALL YIELDS</>
-              )}
+              ⚡ YIELD TRACKING (Configure Revenue System)
             </button>
           </div>
         </div>

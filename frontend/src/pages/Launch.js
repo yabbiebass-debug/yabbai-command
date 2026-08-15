@@ -45,6 +45,7 @@ export default function Launch() {
     setSeqLines([]);
     setSeqIdx(0);
     for (let i = 0; i < SEQUENCE.length; i++) {
+      // UX timing delay only - creates typewriter effect, not displaying fake metrics
       await new Promise(r => setTimeout(r, 350 + Math.random() * 200));
       setSeqLines(prev => [...prev, { text: SEQUENCE[i], i }]);
       setSeqIdx(i);

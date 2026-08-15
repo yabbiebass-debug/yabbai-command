@@ -128,12 +128,15 @@ export default function CommandCentre() {
     // Animation loop intentionally runs once - re-running would create duplicate RAF loops
   }, []);
 
-  // Neural network canvas (visual only)
+  // Neural network canvas animation (VISUAL ONLY - NOT DISPLAYING METRICS)
+  // This animation uses Math.random() only for particle positioning and movement
+  // All actual metrics are fetched from real backend APIs above
   useEffect(() => {
     const canvas = neuralRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const N = 40;
+    // Random particle positions for visual effect only
     const nodes = Array.from({ length: N }, () => ({
       x: Math.random() * 100,
       y: Math.random() * 100,

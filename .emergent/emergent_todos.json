@@ -1,14 +1,10 @@
 [
   {
-    "content": "Fix agent_pool.py undefined 'now' variable bug",
-    "status": "in_progress"
+    "content": "Take screenshots of all updated pages to verify real-data-only display",
+    "status": "completed"
   },
   {
-    "content": "Add useMemo to ToastContext inline object",
-    "status": "pending"
-  },
-  {
-    "content": "Document animation hooks with eslint-disable",
+    "content": "Call testing agent for comprehensive E2E validation",
     "status": "pending"
   }
 ]

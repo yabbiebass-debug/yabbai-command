@@ -72,6 +72,7 @@ export default function Mission() {
     setConsoleLines([]);
     setMissionPlan('');
     for (let i = 0; i < CONSOLE_LINES.length; i++) {
+      // UX timing delay only - creates console output effect, not displaying fake metrics
       await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
       setConsoleLines(prev => [...prev, CONSOLE_LINES[i]]);
     }

@@ -353,6 +353,82 @@ class YabbaiAPITester:
             print(f"   ✓ Total swept: {response.get('total_swept_sol', 0)} SOL")
         return success, response
 
+    # ── Truth Protocol / Data Integrity Tests ────────────────────────────────
+
+    def test_revenue_status(self):
+        """Test revenue system status - should show real data only"""
+        success, response = self.run_test(
+            "Revenue Status (Truth Protocol)",
+            "GET",
+            "revenue/status",
+            200
+        )
+        if success:
+            real_income = response.get('real_income', 0)
+            net_profit = response.get('net_profit', 0)
+            print(f"   ✓ Real Income: ${real_income:.2f}")
+            print(f"   ✓ Net Profit: ${net_profit:.2f}")
+            # Verify it's showing $0.00 with no payment processor data
+            if real_income == 0:
+                print(f"   ✓ Correctly showing $0.00 (no payment processor data)")
+        return success, response
+
+    def test_agents_status(self):
+        """Test agent pool status - should show real agent data"""
+        success, response = self.run_test(
+            "Agent Pool Status",
+            "GET",
+            "agents/status",
+            200
+        )
+        if success:
+            total_agents = response.get('total_agents', 0)
+            total_cycles = response.get('total_cycles', 0)
+            print(f"   ✓ Total Agents: {total_agents}")
+            print(f"   ✓ Total Cycles: {total_cycles}")
+        return success, response
+
+    def test_health_details(self):
+        """Test health details endpoint - should return real service metrics"""
+        success, response = self.run_test(
+            "Health Details (Real Metrics)",
+            "GET",
+            "health/details",
+            200
+        )
+        if success:
+            services = response.get('services', [])
+            print(f"   ✓ Monitoring {len(services)} service(s)")
+            for service in services:
+                status = service.get('status', 'unknown')
+                latency = service.get('latency', 0)
+                name = service.get('name', 'Unknown')
+                print(f"   ✓ {name}: {status} ({latency}ms)")
+        return success, response
+
+    def test_live_income_stream(self):
+        """Test live income stream - should only show payment processor data"""
+        success, response = self.run_test(
+            "Live Income Stream (Payment Processor Only)",
+            "GET",
+            "revenue/live/income",
+            200,
+            params={"limit": 100}
+        )
+        if success:
+            income_items = response.get('income', [])
+            total = response.get('total', 0)
+            print(f"   ✓ Income entries: {len(income_items)}")
+            print(f"   ✓ Total: ${total:.2f}")
+            
+            # Verify all entries are from payment processor
+            non_payment_sources = [item for item in income_items if item.get('source') not in ['product_sale', 'invoice_paid']]
+            if non_payment_sources:
+                print(f"   ⚠ WARNING: Found {len(non_payment_sources)} non-payment-processor entries")
+            else:
+                print(f"   ✓ All entries are from payment processor sources")
+        return success, response
+
 def main():
     print("=" * 60)
     print("YABBAI BACKEND API TEST SUITE - PHASE 3+4")
@@ -416,6 +492,22 @@ def main():
 
     # Analytics aggregate
     tester.test_get_analytics()
+
+    print("\n" + "=" * 60)
+    print("TRUTH PROTOCOL / DATA INTEGRITY TESTS")
+    print("=" * 60)
+
+    # Revenue system (Truth Protocol)
+    tester.test_revenue_status()
+    
+    # Agent pool status
+    tester.test_agents_status()
+    
+    # Health details (real service metrics)
+    tester.test_health_details()
+    
+    # Live income stream (payment processor only)
+    tester.test_live_income_stream()
 
     # Print summary
     print("\n" + "=" * 60)
