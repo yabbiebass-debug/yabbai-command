@@ -352,9 +352,16 @@ async def get_jupiter_price(request: Request, mint: str):
     cached = PRICE_CACHE.get(mint)
     if cached and (time.time() - cached["ts"]) < PRICE_TTL:
         return {"ok": True, "price": cached["price"], "mint": mint, "cached": True}
+    
+    # Get Jupiter API key from environment
+    jupiter_api_key = os.environ.get("JUPITER_API_KEY", "")
+    headers = {"Accept": "application/json"}
+    if jupiter_api_key:
+        headers["x-api-key"] = jupiter_api_key
+    
     try:
         async with httpx.AsyncClient(timeout=8.0) as h:
-            resp = await h.get("https://api.jup.ag/price/v2", params={"ids": mint}, headers={"Accept": "application/json"})
+            resp = await h.get("https://api.jup.ag/price/v2", params={"ids": mint}, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
                 price_data = data.get("data", {}).get(mint, {})
@@ -973,9 +980,14 @@ async def check_solana_rpc_health() -> dict:
 async def check_jupiter_health() -> dict:
     """Check Jupiter API health."""
     try:
+        jupiter_api_key = os.environ.get("JUPITER_API_KEY", "")
+        headers = {}
+        if jupiter_api_key:
+            headers["x-api-key"] = jupiter_api_key
+            
         start = time.time()
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get("https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=1000000")
+            resp = await client.get("https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=1000000", headers=headers)
         latency_ms = int((time.time() - start) * 1000)
         return {
             "id": "jup",
