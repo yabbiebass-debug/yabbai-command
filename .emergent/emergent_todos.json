@@ -1,10 +1,26 @@
 [
   {
-    "content": "Run bearer-token test per README_PATCH.md and document raw results",
+    "content": "Clear transactions history",
     "status": "completed"
   },
   {
-    "content": "Call testing_agent for comprehensive SSO and route protection verification",
+    "content": "Clear treasury snapshots",
+    "status": "completed"
+  },
+  {
+    "content": "Clear price history data",
+    "status": "completed"
+  },
+  {
+    "content": "Clear analytics events log",
+    "status": "completed"
+  },
+  {
+    "content": "Clear token mint configuration completely",
+    "status": "completed"
+  },
+  {
+    "content": "Verify settings and missions are preserved",
     "status": "completed"
   }
 ]
