@@ -16,7 +16,6 @@ import SideHustle from './pages/SideHustle';
 import Promo from './pages/Promo';
 import Settings from './pages/Settings';
 import Analytics from './pages/Analytics';
-import AuthDebug from './pages/AuthDebug';
 import './index.css';
 
 function App() {
@@ -39,7 +38,6 @@ function App() {
               <Route path="/promo" element={<Promo />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/analytics" element={<Analytics />} />
-              <Route path="/auth-debug" element={<AuthDebug />} />
             </Route>
           </Routes>
         </ProtectedRoute>
