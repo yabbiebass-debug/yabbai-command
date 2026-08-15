@@ -18,18 +18,11 @@ const NAV_LINKS = [
 ];
 
 const TICKER_ITEMS = [
-  { label: 'SOL', value: '$178.42', color: 'solana-green' },
-  { label: 'BTC', value: '$98,441', color: '' },
-  { label: 'ETH', value: '$3,284', color: '' },
-  { label: 'YABBAI', value: 'LIVE', color: 'solana-purple' },
-  { label: 'MCAP', value: '$2.4M', color: 'solana-green' },
-  { label: 'HOLDERS', value: '1,337', color: '' },
-  { label: 'MISSIONS', value: '42 ACTIVE', color: 'solana-green' },
-  { label: 'YIELD', value: '+$847 TODAY', color: 'solana-green' },
-  { label: 'TREASURY', value: '124.7 SOL', color: 'solana-purple' },
-  { label: 'APY', value: '847%', color: 'solana-green' },
-  { label: 'TXS', value: '12,441 TODAY', color: '' },
-  { label: 'NETWORK', value: 'MAINNET-BETA', color: '' },
+  { label: 'YABBAI', value: 'COMMAND CENTRE', color: 'solana-purple' },
+  { label: 'NETWORK', value: 'MAINNET-BETA', color: 'solana-green' },
+  { label: 'STATUS', value: 'OPERATIONAL', color: 'solana-green' },
+  { label: 'HUB', value: 'CONNECTED', color: 'solana-purple' },
+  { label: 'SECURITY', value: 'DIRECTOR-ONLY', color: 'solana-green' },
 ];
 
 export default function Layout() {
