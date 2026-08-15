@@ -7,7 +7,6 @@ const NAV_LINKS = [
   { to: '/launch', label: 'Launch' },
   { to: '/mission', label: 'Mission' },
   { to: '/payment', label: 'Payment' },
-  { to: '/wallet', label: 'Wallet' },
   { to: '/withdraw', label: 'Withdraw' },
   { to: '/api-pulse', label: 'API Pulse' },
   { to: '/basham', label: 'BASHAM' },

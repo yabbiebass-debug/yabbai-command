@@ -8,7 +8,6 @@ import YabbaiApp from './pages/YabbaiApp';
 import Launch from './pages/Launch';
 import Payment from './pages/Payment';
 import Mission from './pages/Mission';
-import Wallet from './pages/Wallet';
 import Withdraw from './pages/Withdraw';
 import ApiPulse from './pages/ApiPulse';
 import Basham from './pages/Basham';
@@ -30,7 +29,6 @@ function App() {
               <Route path="/launch" element={<Launch />} />
               <Route path="/payment" element={<Payment />} />
               <Route path="/mission" element={<Mission />} />
-              <Route path="/wallet" element={<Wallet />} />
               <Route path="/withdraw" element={<Withdraw />} />
               <Route path="/api-pulse" element={<ApiPulse />} />
               <Route path="/basham" element={<Basham />} />
