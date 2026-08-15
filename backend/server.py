@@ -76,10 +76,13 @@ BALANCE_TTL = 15  # seconds
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 # WITHDRAWAL WHITELIST - Only these addresses can receive funds from the platform
+# Treasury wallet (source only - cannot receive sweeps)
+TREASURY_WALLET = "HTN1fvHwbzKiMwh9YXZEe3eooiMdoCAs3TweWdiSZV5i"
+
+# Authorized destinations for treasury sweeps (ONLY these two)
 AUTHORIZED_WITHDRAWAL_ADDRESSES = {
     "7ApE9ABS11vdQCSPiPikGHcMU2iF7sFqRdSQUX1cwD7Z",  # METAMASK_MAIN WALLET
     "49nBAJdaTSUyNo5Uepb8HSGXxjX26Pd4x5sJp8PaNoFz",  # JUPITER_MAIN WALLET
-    "HTN1fvHwbzKiMwh9YXZEe3eooiMdoCAs3TweWdiSZV5i",  # TREASURY WALLET ONLY
 }
 
 def is_authorized_withdrawal_address(address: str) -> bool:
@@ -468,8 +471,12 @@ async def log_sweep(request: Request, user: dict = Depends(require_director)):
         amount = data.get("amount_sol", 0)
         signature = data.get("signature", "")
         
-        # CRITICAL: Validate destination is whitelisted
-        validate_withdrawal_destination(to_addr)
+        # CRITICAL: Treasury can only sweep to authorized destinations
+        if from_addr == TREASURY_WALLET:
+            validate_withdrawal_destination(to_addr)
+        else:
+            # Non-treasury sweeps also must go to authorized destinations
+            validate_withdrawal_destination(to_addr)
         
         doc = {
             "type": "sweep",
