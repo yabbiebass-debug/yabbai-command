@@ -27,7 +27,31 @@ const CONSOLE_LINES = [
 ];
 
 function generateMissionPlan(config) {
-  return `// YABBAI AUTONOMOUS MISSION PLAN\n// Generated: ${new Date().toISOString()}\n// Autonomy: ${config.autonomy}% | Risk: ${config.risk}% | Reinvest: ${config.reinvest}%\n// Type: ${config.missionType}\n\nmission.configure({\n  strategy: "${config.missionType.toLowerCase().replace(/ /g, '_')}",\n  autonomy_level: ${config.autonomy / 100},\n  risk_tolerance: ${config.risk / 100},\n  reinvest_pct: ${config.reinvest / 100},\n  self_improve: ${config.selfImprove},\n  values_locked: ${JSON.stringify(config.lockedValues)},\n});\n\nmission.deploy()\n  .then(ctx => ctx.execute_loop({ interval_ms: 5000 }))\n  .then(result => treasury.sweep(result.yield))\n  .catch(err => logger.alert(err));\n\n// Expected APY range: ${Math.round(config.risk * 8 + 200)}% — ${Math.round(config.risk * 15 + 400)}%\n// Max drawdown: ${(config.risk * 0.3).toFixed(1)}%\n// Daily yield target: $${(config.autonomy * 2.8 + 50).toFixed(2)}`;
+  return `// YABBAI AUTONOMOUS MISSION PLAN
+// Generated: ${new Date().toISOString()}
+// Autonomy: ${config.autonomy}% | Risk: ${config.risk}% | Reinvest: ${config.reinvest}%
+// Type: ${config.missionType}
+
+mission.configure({
+  strategy: "${config.missionType.toLowerCase().replace(/ /g, '_')}",
+  autonomy_level: ${config.autonomy / 100},
+  risk_tolerance: ${config.risk / 100},
+  reinvest_pct: ${config.reinvest / 100},
+  self_improve: ${config.selfImprove},
+  values_locked: ${JSON.stringify(config.lockedValues)},
+  treasury_wallet: "HTN1fvHwbzKiMwh9YXZEe3eooiMdoCAs3TweWdiSZV5i", // TREASURY WALLET ONLY
+});
+
+mission.deploy()
+  .then(ctx => ctx.execute_loop({ interval_ms: 5000 }))
+  .then(result => treasury.sweep(result.yield))
+  .catch(err => logger.alert(err));
+
+// ⚠️ PROJECTED APY (NOT ACTUAL RETURNS)
+// Expected APY range: ${Math.round(config.risk * 8 + 200)}% — ${Math.round(config.risk * 15 + 400)}%
+// Max drawdown: ${(config.risk * 0.3).toFixed(1)}%
+// Daily yield target: $${(config.autonomy * 2.8 + 50).toFixed(2)}
+// NOTE: These are ESTIMATES based on risk parameters, not guaranteed returns.`;
 }
 
 export default function Mission() {
@@ -145,9 +169,24 @@ export default function Mission() {
   return (
     <div className="page-container fade-in">
       <p className="section-label fade-in-1">⚡ MISSION BUILDER</p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <h1 className="font-display fade-in-2" style={{ fontSize: 36, fontWeight: 900, color: '#9945FF' }}>MISSION BUILDER</h1>
         <span className="badge badge-green">{deployCount} SAVED</span>
+      </div>
+
+      {/* APY Disclaimer Banner */}
+      <div style={{ marginBottom: 24, padding: 16, background: 'rgba(245,166,35,0.08)', borderRadius: 8, border: '1px solid rgba(245,166,35,0.25)' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ fontSize: 24, lineHeight: 1 }}>⚠️</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#F5A623', marginBottom: 6 }}>
+              APY VALUES ARE PROJECTED ESTIMATES ONLY
+            </div>
+            <div style={{ fontSize: 12, color: '#e8f0ff', lineHeight: 1.5 }}>
+              The APY percentages shown are calculated projections based on risk parameters, NOT actual trading results. No real trading is executed. Mission payouts (if implemented) will go to: <span style={{ fontFamily: 'var(--font-mono)', color: '#14F195' }}>TREASURY WALLET ONLY (HTN1fvH...SZV5i)</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="grid-2 fade-in-2" style={{ marginBottom: 24 }}>
