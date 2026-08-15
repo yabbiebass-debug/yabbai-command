@@ -94,15 +94,23 @@ export default function Analytics() {
         const phR = await fetch(`${API}/price-history?mint=${mintR.mint}&limit=200`);
         const phData = await phR.json();
         if (phData.ok) setPriceHistory(phData.points.map((p, i) => ({ ts: formatTs(p.ts), price: p.price, i })));
+      }
+      
+      // Load treasury snapshots ONLY for current treasury wallet
+      if (settingsR?.treasury_wallet) {
         const tsR = await fetch(`${API}/treasury-snapshots?limit=200`);
         const tsData = await tsR.json();
-        if (Array.isArray(tsData)) setTreasuryHistory(tsData.map((s, i) => ({ ts: formatTs(s.ts), balance: s.balance_sol, usd: (s.balance_sol * SOL_USD).toFixed(2), i })));
-      } else {
-        // Fallback: generate demo treasury snapshots for visual
-        const tsR = await fetch(`${API}/treasury-snapshots?limit=200`);
-        const tsData = await tsR.json();
-        if (Array.isArray(tsData) && tsData.length > 0) {
-          setTreasuryHistory(tsData.map((s, i) => ({ ts: formatTs(s.ts), balance: s.balance_sol, usd: (s.balance_sol * SOL_USD).toFixed(2), i })));
+        if (Array.isArray(tsData)) {
+          // Filter to only show snapshots for the CURRENT treasury wallet
+          const currentWalletSnapshots = tsData.filter(s => 
+            s.address && s.address.toLowerCase() === settingsR.treasury_wallet.toLowerCase()
+          );
+          setTreasuryHistory(currentWalletSnapshots.map((s, i) => ({ 
+            ts: formatTs(s.ts), 
+            balance: s.balance_sol, 
+            usd: (s.balance_sol * SOL_USD).toFixed(2), 
+            i 
+          })));
         }
       }
     } catch (e) {
@@ -134,7 +142,9 @@ export default function Analytics() {
   const PIE_COLORS = ['#9945FF', '#14F195', '#F5A623', '#ff6060'];
 
   const totalSweptUsd = (metrics?.total_swept_sol || 0) * SOL_USD;
-  const latestTreasury = treasuryHistory[treasuryHistory.length - 1]?.balance || metrics?.latest_treasury_sol || 0;
+  // Use LIVE treasury balance, not historical snapshots
+  const currentTreasuryBalance = treasuryBalance; // This is the real live balance from blockchain
+  const latestHistoricalBalance = treasuryHistory[treasuryHistory.length - 1]?.balance || 0;
 
   // Treasury sweep handler - connects to Phantom wallet
   const handleTreasurySweep = async () => {
@@ -143,15 +153,31 @@ export default function Analytics() {
       return;
     }
 
-    if (treasuryBalance < 50.005) {
-      setSweepResult({ type: 'error', message: `Insufficient balance. Need 50.005 SOL (50 + 0.005 fee), have ${treasuryBalance.toFixed(4)} SOL` });
-      return;
-    }
-
     setSweeping(true);
-    setSweepResult({ type: 'info', message: '🔐 Connecting to Phantom wallet...' });
+    setSweepResult({ type: 'info', message: '🔐 Validating destination address...' });
 
     try {
+      // STEP 1: Validate destination is whitelisted
+      const validateResp = await fetch(`${API}/sweep/validate-destination?address=${mainWallet}`);
+      const validateData = await validateResp.json();
+      
+      if (!validateData.authorized) {
+        setSweepResult({ 
+          type: 'error', 
+          message: `❌ SECURITY: Destination ${mainWallet.slice(0, 8)}... is NOT authorized. Funds can only be sent to whitelisted addresses.` 
+        });
+        setSweeping(false);
+        return;
+      }
+
+      if (treasuryBalance < 50.005) {
+        setSweepResult({ type: 'error', message: `Insufficient balance. Need 50.005 SOL (50 + 0.005 fee), have ${treasuryBalance.toFixed(4)} SOL` });
+        setSweeping(false);
+        return;
+      }
+
+      setSweepResult({ type: 'info', message: '✅ Destination authorized. Connecting to Phantom wallet...' });
+
       // Check if Phantom is installed
       const { solana } = window;
       if (!solana || !solana.isPhantom) {
@@ -305,8 +331,22 @@ export default function Analytics() {
                   </ResponsiveContainer>
                 ) : <EmptyChart />}
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#e8f0ff', marginTop: 8 }}>
-                  Current: <span style={{ color: '#9945FF', fontWeight: 700 }}>{latestTreasury.toFixed(4)} SOL</span>
-                  &nbsp;≈ <span style={{ color: '#14F195' }}>${(latestTreasury * SOL_USD).toFixed(2)}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>
+                      Live Balance: <span style={{ color: '#14F195', fontWeight: 700 }}>{currentTreasuryBalance.toFixed(4)} SOL</span>
+                      &nbsp;≈ <span style={{ color: '#14F195' }}>${(currentTreasuryBalance * SOL_USD).toFixed(2)}</span>
+                    </span>
+                    {latestHistoricalBalance > 0 && latestHistoricalBalance !== currentTreasuryBalance && (
+                      <span style={{ fontSize: 9, color: '#F5A623' }}>
+                        ⚠️ Chart shows history from current wallet only
+                      </span>
+                    )}
+                  </div>
+                  {treasuryHistory.length === 0 && (
+                    <div style={{ fontSize: 9, color: '#3a5070', marginTop: 4 }}>
+                      No historical data for this wallet yet. Snapshots will accumulate over time.
+                    </div>
+                  )}
                 </div>
               </div>
               {/* Transaction volume */}
@@ -409,6 +449,17 @@ export default function Analytics() {
                 {/* Help text */}
                 <div style={{ marginTop: 12, fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070', lineHeight: 1.5 }}>
                   💡 This will transfer 50 SOL from your treasury to your main wallet. You must sign the transaction in Phantom wallet. Requires Phantom browser extension installed and connected to treasury wallet.
+                  <div style={{ marginTop: 8, padding: 8, background: 'rgba(20,241,149,0.05)', borderRadius: 4, border: '1px solid rgba(20,241,149,0.1)' }}>
+                    <div style={{ color: '#14F195', fontWeight: 700, marginBottom: 4 }}>🔒 SECURITY: Whitelisted Addresses Only</div>
+                    <div style={{ color: '#3a5070' }}>
+                      Funds can ONLY be sent to these authorized addresses:
+                      <div style={{ marginTop: 4, marginLeft: 8 }}>
+                        • 7ApE9...cwD7Z (Main)<br/>
+                        • 49nBA...aNoFz (Secondary)<br/>
+                        • HTN1f...wdiSZV5i (Treasury)
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

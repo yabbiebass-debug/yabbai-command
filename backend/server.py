@@ -64,6 +64,27 @@ BALANCE_TTL = 15  # seconds
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+# WITHDRAWAL WHITELIST - Only these addresses can receive funds from the platform
+AUTHORIZED_WITHDRAWAL_ADDRESSES = {
+    "7ApE9ABS11vdQCSPiPikGHcMU2iF7sFqRdSQUX1cwD7Z",  # Main wallet
+    "49nBAJdaTSUyNo5Uepb8HSGXxjX26Pd4x5sJp8PaNoFz",  # Secondary wallet
+    "HTN1fvHwbzKiMwh9YXZEe3eooiMdoCAs3TweWdiSZV5i",  # Treasury wallet
+}
+
+def is_authorized_withdrawal_address(address: str) -> bool:
+    """Check if an address is authorized to receive withdrawals/sweeps."""
+    if not address:
+        return False
+    return address.strip() in AUTHORIZED_WITHDRAWAL_ADDRESSES
+
+def validate_withdrawal_destination(address: str) -> None:
+    """Validate withdrawal destination address. Raises HTTPException if not authorized."""
+    if not is_authorized_withdrawal_address(address):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Unauthorized withdrawal address. Funds can only be sent to whitelisted addresses for security."
+        )
+
 def serialize(doc):
     if doc is None:
         return None
@@ -413,6 +434,49 @@ async def get_analytics():
         "total_swept_sol": total_swept,
         "latest_price": latest_price,
         "latest_treasury_sol": latest_treasury,
+    }
+
+# ── Sweep / Withdrawal Endpoints ────────────────────────────────────────────────
+
+@api_router.post("/sweep")
+@limiter.limit("10/minute")
+async def log_sweep(request: Request):
+    """Log a sweep/withdrawal transaction with destination validation."""
+    try:
+        data = await request.json()
+        from_addr = data.get("from", "")
+        to_addr = data.get("to", "")
+        amount = data.get("amount_sol", 0)
+        signature = data.get("signature", "")
+        
+        # CRITICAL: Validate destination is whitelisted
+        validate_withdrawal_destination(to_addr)
+        
+        doc = {
+            "type": "sweep",
+            "from_address": from_addr,
+            "to_address": to_addr,
+            "amount_sol": amount,
+            "signature": signature,
+            "created_at": utcnow(),
+        }
+        await db.transactions.insert_one(doc)
+        return {"ok": True, "message": "Sweep logged successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Sweep logging error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/sweep/validate-destination")
+async def validate_sweep_destination(address: str = Query(...)):
+    """Validate if an address is authorized for withdrawals."""
+    is_authorized = is_authorized_withdrawal_address(address)
+    return {
+        "authorized": is_authorized,
+        "address": address,
+        "message": "Address is authorized for withdrawals" if is_authorized else "Address is NOT authorized. Only whitelisted addresses can receive funds.",
+        "whitelist": list(AUTHORIZED_WITHDRAWAL_ADDRESSES)
     }
 
 # ── Health ───────────────────────────────────────────────────────────────────
