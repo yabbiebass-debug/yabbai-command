@@ -9,18 +9,18 @@ const FEE_BUFFER = 0.005; // SOL reserved for tx fees
 const AUTHORIZED_WALLETS = [
   { 
     address: '7ApE9ABS11vdQCSPiPikGHcMU2iF7sFqRdSQUX1cwD7Z', 
-    label: 'Main Wallet',
-    description: 'Primary withdrawal destination'
+    label: 'METAMASK_MAIN WALLET',
+    description: 'Primary MetaMask withdrawal destination'
   },
   { 
     address: '49nBAJdaTSUyNo5Uepb8HSGXxjX26Pd4x5sJp8PaNoFz', 
-    label: 'Main Wallet 2',
-    description: 'Secondary withdrawal destination'
+    label: 'JUPITER_MAIN WALLET',
+    description: 'Jupiter aggregator destination'
   },
   { 
     address: 'HTN1fvHwbzKiMwh9YXZEe3eooiMdoCAs3TweWdiSZV5i', 
-    label: 'Treasury Wallet',
-    description: 'Treasury consolidation address'
+    label: 'TREASURY WALLET ONLY',
+    description: 'Treasury consolidation address (primary holding)'
   },
 ];
 

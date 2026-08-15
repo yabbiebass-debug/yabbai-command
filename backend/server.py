@@ -66,9 +66,9 @@ BALANCE_TTL = 15  # seconds
 
 # WITHDRAWAL WHITELIST - Only these addresses can receive funds from the platform
 AUTHORIZED_WITHDRAWAL_ADDRESSES = {
-    "7ApE9ABS11vdQCSPiPikGHcMU2iF7sFqRdSQUX1cwD7Z",  # Main wallet
-    "49nBAJdaTSUyNo5Uepb8HSGXxjX26Pd4x5sJp8PaNoFz",  # Secondary wallet
-    "HTN1fvHwbzKiMwh9YXZEe3eooiMdoCAs3TweWdiSZV5i",  # Treasury wallet
+    "7ApE9ABS11vdQCSPiPikGHcMU2iF7sFqRdSQUX1cwD7Z",  # METAMASK_MAIN WALLET
+    "49nBAJdaTSUyNo5Uepb8HSGXxjX26Pd4x5sJp8PaNoFz",  # JUPITER_MAIN WALLET
+    "HTN1fvHwbzKiMwh9YXZEe3eooiMdoCAs3TweWdiSZV5i",  # TREASURY WALLET ONLY
 }
 
 def is_authorized_withdrawal_address(address: str) -> bool:
