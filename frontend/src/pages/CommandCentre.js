@@ -54,11 +54,13 @@ export default function CommandCentre() {
 
         // Generate live events from real data
         const newEvents = [];
+        const timestamp = Date.now();
         if (agentData.total_revenue > 0) {
           newEvents.push({
             type: 'revenue',
             message: `Revenue: $${agentData.total_revenue.toFixed(2)}`,
             time: new Date().toLocaleTimeString(),
+            ts: timestamp,
           });
         }
         if (agentData.total_agents > 0) {
@@ -66,6 +68,7 @@ export default function CommandCentre() {
             type: 'agent',
             message: `${agentData.total_agents} agents active`,
             time: new Date().toLocaleTimeString(),
+            ts: timestamp + 1, // Ensure unique timestamp
           });
         }
         if (agentData.total_cycles > 0) {
@@ -73,6 +76,7 @@ export default function CommandCentre() {
             type: 'cycle',
             message: `${agentData.total_cycles} cycles completed`,
             time: new Date().toLocaleTimeString(),
+            ts: timestamp + 2, // Ensure unique timestamp
           });
         }
 
@@ -324,9 +328,9 @@ export default function CommandCentre() {
               Waiting for events...
             </p>
           ) : (
-            events.map((evt, idx) => (
+            events.map((evt) => (
               <div 
-                key={idx} 
+                key={`${evt.type}-${evt.ts}-${evt.agent || evt.channel || evt.message}`} 
                 style={{ 
                   padding: '8px 12px',
                   background: 'rgba(153,69,255,0.03)',

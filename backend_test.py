@@ -429,6 +429,137 @@ class YabbaiAPITester:
                 print(f"   ✓ All entries are from payment processor sources")
         return success, response
 
+    # ── Code Quality Improvements Tests ──────────────────────────────────────
+
+    def test_health_details_performance(self):
+        """Test health details endpoint performance - should complete in <5s with concurrent checks"""
+        import time
+        print(f"\n🔍 Testing Health Details Performance (Concurrent Execution)...")
+        
+        url = f"{self.api_url}/health/details"
+        headers = {'Content-Type': 'application/json'}
+        
+        self.tests_run += 1
+        
+        try:
+            start_time = time.time()
+            response = requests.get(url, headers=headers, timeout=10)
+            elapsed_time = time.time() - start_time
+            
+            success = response.status_code == 200 and elapsed_time < 5.0
+            
+            if response.status_code == 200:
+                data = response.json()
+                services = data.get('services', [])
+                
+                print(f"✅ Status: {response.status_code}")
+                print(f"   ✓ Response time: {elapsed_time:.2f}s (target: <5s)")
+                print(f"   ✓ Services checked: {len(services)}")
+                
+                # Verify all expected services are present
+                expected_services = ['mongodb', 'sol-rpc', 'jup', 'revenue', 'agents']
+                found_services = [s.get('id') for s in services]
+                
+                for expected in expected_services:
+                    if expected in found_services:
+                        service = next(s for s in services if s.get('id') == expected)
+                        print(f"   ✓ {service.get('name')}: {service.get('status')} ({service.get('latency')}ms)")
+                    else:
+                        print(f"   ⚠ Missing service: {expected}")
+                        success = False
+                
+                if elapsed_time < 5.0:
+                    print(f"   ✅ PASS: Concurrent execution working (completed in {elapsed_time:.2f}s)")
+                    self.tests_passed += 1
+                else:
+                    print(f"   ❌ FAIL: Too slow ({elapsed_time:.2f}s), concurrent execution may not be working")
+                
+                self.test_results.append({
+                    "test": "Health Details Performance",
+                    "status": "PASS" if success else "FAIL",
+                    "response_time": f"{elapsed_time:.2f}s",
+                    "services_count": len(services)
+                })
+                
+                return success, data
+            else:
+                print(f"❌ Failed - Status: {response.status_code}")
+                self.test_results.append({"test": "Health Details Performance", "status": "FAIL", "error": f"Status {response.status_code}"})
+                return False, {}
+                
+        except Exception as e:
+            print(f"❌ Failed - Error: {str(e)}")
+            self.test_results.append({"test": "Health Details Performance", "status": "FAIL", "error": str(e)})
+            return False, {}
+
+    def test_withdrawal_whitelist_validation(self):
+        """Test withdrawal whitelist - should reject unauthorized addresses"""
+        print(f"\n🔍 Testing Withdrawal Whitelist Security...")
+        
+        self.tests_run += 1
+        
+        # Test 1: Validate authorized address
+        authorized_address = "7ApE9ABS11vdQCSPiPikGHcMU2iF7sFqRdSQUX1cwD7Z"
+        success1, response1 = self.run_test(
+            "Validate Authorized Address",
+            "GET",
+            "sweep/validate-destination",
+            200,
+            params={"address": authorized_address}
+        )
+        
+        if success1:
+            if response1.get('authorized'):
+                print(f"   ✅ Authorized address correctly validated")
+            else:
+                print(f"   ❌ Authorized address incorrectly rejected")
+                return False, response1
+        
+        # Test 2: Validate unauthorized address
+        unauthorized_address = "UnauthorizedWallet1111111111111111111111111"
+        success2, response2 = self.run_test(
+            "Validate Unauthorized Address",
+            "GET",
+            "sweep/validate-destination",
+            200,
+            params={"address": unauthorized_address}
+        )
+        
+        if success2:
+            if not response2.get('authorized'):
+                print(f"   ✅ Unauthorized address correctly rejected")
+            else:
+                print(f"   ❌ Unauthorized address incorrectly allowed")
+                return False, response2
+        
+        # Test 3: Attempt sweep to unauthorized address (should fail with 403)
+        print(f"\n🔍 Testing Sweep to Unauthorized Address (should fail)...")
+        success3, response3 = self.run_test(
+            "Sweep to Unauthorized Address",
+            "POST",
+            "sweep",
+            403,  # Should return 403 Forbidden
+            data={
+                "from": "7dzgCA8G55VytZ8PS1b99rbbctzCgJbnEoBEYBnn15YR",
+                "to": unauthorized_address,
+                "amount_sol": 1.0,
+                "signature": "test_signature_123"
+            }
+        )
+        
+        if success3:
+            print(f"   ✅ Sweep to unauthorized address correctly blocked")
+            self.tests_passed += 1
+        else:
+            print(f"   ❌ Sweep to unauthorized address was not blocked properly")
+        
+        self.test_results.append({
+            "test": "Withdrawal Whitelist Security",
+            "status": "PASS" if (success1 and success2 and success3) else "FAIL"
+        })
+        
+        return success1 and success2 and success3, {}
+
 def main():
     print("=" * 60)
     print("YABBAI BACKEND API TEST SUITE - PHASE 3+4")
@@ -508,6 +639,16 @@ def main():
     
     # Live income stream (payment processor only)
     tester.test_live_income_stream()
+
+    print("\n" + "=" * 60)
+    print("CODE QUALITY IMPROVEMENTS TESTS")
+    print("=" * 60)
+
+    # Test concurrent health checks performance
+    tester.test_health_details_performance()
+    
+    # Test withdrawal whitelist security
+    tester.test_withdrawal_whitelist_validation()
 
     # Print summary
     print("\n" + "=" * 60)
