@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, Query, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, Query, Header, Depends
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -13,6 +13,9 @@ from typing import Optional, List, Any, Dict
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from revenue.system import RevenueSystem
+
+# Hub SSO Integration
+from hub_sso import router as sso_router, require_director
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -51,6 +54,9 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="YABBAI API")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Mount Hub SSO Router
+app.include_router(sso_router)
 
 api_router = APIRouter(prefix="/api")
 
@@ -200,7 +206,7 @@ async def delete_token_mint():
 # ── Settings ───────────────────────────────────────────────────────────────────
 
 @api_router.get("/settings")
-async def get_settings():
+async def get_settings(user: dict = Depends(require_director)):
     doc = await db.settings.find_one({}, {"_id": 0})
     if not doc:
         default = SettingsBody().dict()
@@ -210,7 +216,7 @@ async def get_settings():
     return doc
 
 @api_router.post("/settings")
-async def save_settings(body: SettingsBody):
+async def save_settings(body: SettingsBody, user: dict = Depends(require_director)):
     doc = body.dict()
     doc["updated_at"] = utcnow()
     if doc.get("rpc_url") and doc["custom_rpc_enabled"]:
@@ -440,7 +446,7 @@ async def get_analytics():
 
 @api_router.post("/sweep")
 @limiter.limit("10/minute")
-async def log_sweep(request: Request):
+async def log_sweep(request: Request, user: dict = Depends(require_director)):
     """Log a sweep/withdrawal transaction with destination validation."""
     try:
         data = await request.json()
@@ -501,7 +507,7 @@ def verify_revenue_admin(authorization: Optional[str] = Header(None)):
     return True
 
 @api_router.get("/revenue/dashboard")
-async def revenue_dashboard():
+async def revenue_dashboard(user: dict = Depends(require_director)):
     """Get complete revenue dashboard data."""
     try:
         data = await revenue_system.get_dashboard_data()
