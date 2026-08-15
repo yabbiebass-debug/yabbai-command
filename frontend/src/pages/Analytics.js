@@ -398,11 +398,35 @@ export default function Analytics() {
                   </div>
                 </div>
 
-                <div style={{ marginBottom: 16, padding: 12, background: 'rgba(20,241,149,0.05)', borderRadius: 6, border: '1px solid rgba(20,241,149,0.2)' }}>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#14F195', marginBottom: 8 }}>DESTINATION (MAIN WALLET)</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070', wordBreak: 'break-all' }}>
-                    {mainWallet || 'Not configured in Settings'}
-                  </div>
+                {/* Destination Dropdown - ONLY METAMASK_MAIN and JUPITER_MAIN */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#14F195', marginBottom: 8, display: 'block' }}>
+                    🔒 DESTINATION (SELECT AUTHORIZED WALLET)
+                  </label>
+                  <select
+                    className="field"
+                    value={mainWallet}
+                    onChange={e => setMainWallet(e.target.value)}
+                    style={{ 
+                      borderColor: mainWallet ? 'rgba(20,241,149,0.3)' : 'rgba(153,69,255,0.18)',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="">Select destination wallet...</option>
+                    <option value="7ApE9ABS11vdQCSPiPikGHcMU2iF7sFqRdSQUX1cwD7Z">
+                      METAMASK_MAIN (7ApE9...cwD7Z)
+                    </option>
+                    <option value="49nBAJdaTSUyNo5Uepb8HSGXxjX26Pd4x5sJp8PaNoFz">
+                      JUPITER_MAIN (49nBA...aNoFz)
+                    </option>
+                  </select>
+                  {mainWallet && (
+                    <div style={{ marginTop: 8, padding: 10, background: 'rgba(20,241,149,0.05)', borderRadius: 6, border: '1px solid rgba(20,241,149,0.15)' }}>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#14F195', wordBreak: 'break-all' }}>
+                        ✓ {mainWallet}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Sweep button */}
@@ -449,15 +473,14 @@ export default function Analytics() {
 
                 {/* Help text */}
                 <div style={{ marginTop: 12, fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070', lineHeight: 1.5 }}>
-                  💡 This will transfer 50 SOL from your treasury to your main wallet. You must sign the transaction in Phantom wallet. Requires Phantom browser extension installed and connected to treasury wallet.
+                  💡 This will transfer 50 SOL from your treasury to your selected destination wallet. You must sign the transaction in Phantom wallet. Requires Phantom browser extension installed and connected to treasury wallet.
                   <div style={{ marginTop: 8, padding: 8, background: 'rgba(20,241,149,0.05)', borderRadius: 4, border: '1px solid rgba(20,241,149,0.1)' }}>
                     <div style={{ color: '#14F195', fontWeight: 700, marginBottom: 4 }}>🔒 SECURITY: Whitelisted Addresses Only</div>
                     <div style={{ color: '#3a5070' }}>
                       Funds can ONLY be sent to these authorized addresses:
                       <div style={{ marginTop: 4, marginLeft: 8 }}>
-                        • 7ApE9...cwD7Z (Main)<br/>
-                        • 49nBA...aNoFz (Secondary)<br/>
-                        • HTN1f...wdiSZV5i (Treasury)
+                        • 7ApE9...cwD7Z (METAMASK_MAIN)<br/>
+                        • 49nBA...aNoFz (JUPITER_MAIN)
                       </div>
                     </div>
                   </div>

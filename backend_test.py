@@ -40,7 +40,7 @@ class WalletConfigTester:
             return False
 
     def test_settings_api(self):
-        """Test /api/settings returns NEW treasury wallet"""
+        """Test /api/settings returns correct treasury and main wallet"""
         try:
             response = requests.get(f"{BACKEND_URL}/settings", timeout=10)
             if response.status_code != 200:
@@ -48,15 +48,30 @@ class WalletConfigTester:
             
             data = response.json()
             treasury = data.get("treasury_wallet", "")
+            main_wallet = data.get("main_wallet", "")
             
-            print(f"   Treasury wallet in settings: {treasury}")
+            print(f"   Treasury wallet: {treasury}")
+            print(f"   Main wallet: {main_wallet}")
             
-            if treasury == NEW_TREASURY_WALLET:
-                return True, f"Correct NEW treasury wallet configured"
-            elif treasury == OLD_TREASURY_WALLET:
-                return False, f"CRITICAL: Still using OLD treasury wallet {OLD_TREASURY_WALLET[:8]}..."
-            else:
-                return False, f"Unknown treasury wallet: {treasury[:8]}..."
+            issues = []
+            
+            # Check treasury wallet
+            if treasury != NEW_TREASURY_WALLET:
+                if treasury == OLD_TREASURY_WALLET:
+                    issues.append(f"CRITICAL: Still using OLD treasury wallet {OLD_TREASURY_WALLET[:8]}...")
+                else:
+                    issues.append(f"Unknown treasury wallet: {treasury[:8]}...")
+            
+            # Check main wallet - CRITICAL BUG FIX
+            if "TestWallet" in main_wallet:
+                issues.append(f"CRITICAL: main_wallet still shows TestWallet123 instead of real METAMASK_MAIN")
+            elif main_wallet != METAMASK_MAIN:
+                issues.append(f"main_wallet is {main_wallet[:8]}... but should be METAMASK_MAIN ({METAMASK_MAIN[:8]}...)")
+            
+            if issues:
+                return False, "\n   ".join(issues)
+            
+            return True, f"Treasury and main wallet correctly configured"
         except Exception as e:
             return False, str(e)
 
