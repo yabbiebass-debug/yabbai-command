@@ -5,6 +5,25 @@ const API = `${BACKEND_URL}/api`;
 
 const FEE_BUFFER = 0.005; // SOL reserved for tx fees
 
+// AUTHORIZED WITHDRAWAL WALLETS - Whitelist enforced at UI and backend
+const AUTHORIZED_WALLETS = [
+  { 
+    address: '7ApE9ABS11vdQCSPiPikGHcMU2iF7sFqRdSQUX1cwD7Z', 
+    label: 'Main Wallet',
+    description: 'Primary withdrawal destination'
+  },
+  { 
+    address: '49nBAJdaTSUyNo5Uepb8HSGXxjX26Pd4x5sJp8PaNoFz', 
+    label: 'Main Wallet 2',
+    description: 'Secondary withdrawal destination'
+  },
+  { 
+    address: 'HTN1fvHwbzKiMwh9YXZEe3eooiMdoCAs3TweWdiSZV5i', 
+    label: 'Treasury Wallet',
+    description: 'Treasury consolidation address'
+  },
+];
+
 export default function Withdraw() {
   // Wallet state
   const [phantomConn, setPhantomConn] = useState(false);
@@ -300,24 +319,47 @@ export default function Withdraw() {
         <div className="card">
           <p className="section-label" style={{ marginBottom: 14 }}>STEP 2 — SWEEP TO SAFE WALLET</p>
 
-          {/* Destination */}
+          {/* Destination - DROPDOWN ONLY */}
           <div style={{ marginBottom: 14 }}>
             <label className="stat-label" style={{ display: 'block', marginBottom: 5 }}>
-              DESTINATION (YOUR SAFE WALLET ADDRESS)
+              🔒 DESTINATION (WHITELISTED WALLETS ONLY)
             </label>
-            <input
+            <select
               className="field"
-              placeholder="Enter your main wallet address..."
               value={destination}
               onChange={e => setDestination(e.target.value)}
               data-testid="destination-address"
-              style={{ borderColor: destination.length >= 32 ? 'rgba(20,241,149,0.3)' : 'rgba(153,69,255,0.18)' }}
-            />
-            {destination.length > 0 && destination.length < 32 && (
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#F5A623', marginTop: 4 }}>
-                Address looks too short — Solana addresses are 32–44 characters
+              style={{ 
+                borderColor: destination ? 'rgba(20,241,149,0.3)' : 'rgba(153,69,255,0.18)',
+                cursor: 'pointer',
+                paddingRight: 32
+              }}
+            >
+              <option value="">Select authorized wallet...</option>
+              {AUTHORIZED_WALLETS.map(wallet => (
+                <option key={wallet.address} value={wallet.address}>
+                  {wallet.label} ({wallet.address.slice(0, 4)}...{wallet.address.slice(-4)})
+                </option>
+              ))}
+            </select>
+            {destination && (
+              <div style={{ marginTop: 8, padding: 10, background: 'rgba(20,241,149,0.05)', borderRadius: 6, border: '1px solid rgba(20,241,149,0.15)' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#14F195', marginBottom: 4 }}>
+                  ✓ {AUTHORIZED_WALLETS.find(w => w.address === destination)?.label}
+                </div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070', wordBreak: 'break-all' }}>
+                  {destination}
+                </div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#14F195', marginTop: 4 }}>
+                  {AUTHORIZED_WALLETS.find(w => w.address === destination)?.description}
+                </div>
               </div>
             )}
+            <div style={{ marginTop: 8, padding: 8, background: 'rgba(153,69,255,0.05)', borderRadius: 4, border: '1px solid rgba(153,69,255,0.1)' }}>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#9945FF', lineHeight: 1.5 }}>
+                🔐 SECURITY: Only whitelisted addresses shown. Funds cannot be sent to unauthorized wallets.
+              </div>
+            </div>
           </div>
 
           {/* Amount */}
