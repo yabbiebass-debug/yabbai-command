@@ -4,6 +4,7 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import CopyButton from '../components/CopyButton';
+import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -48,18 +49,46 @@ export default function Analytics() {
   const [mintCfg, setMintCfg] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('overview');
+  
+  // Treasury sweep state
+  const [treasuryWallet, setTreasuryWallet] = useState('');
+  const [mainWallet, setMainWallet] = useState('');
+  const [treasuryBalance, setTreasuryBalance] = useState(0);
+  const [sweeping, setSweeping] = useState(false);
+  const [sweepResult, setSweepResult] = useState(null);
 
   const load = useCallback(async () => {
     try {
-      const [metricsR, txR, missionsR, mintR] = await Promise.all([
+      const [metricsR, txR, missionsR, mintR, settingsR] = await Promise.all([
         fetch(`${API}/analytics`).then(r => r.json()),
         fetch(`${API}/transactions?limit=100`).then(r => r.json()),
         fetch(`${API}/missions`).then(r => r.json()),
         fetch(`${API}/token-mint`).then(r => r.json()),
+        fetch(`${API}/settings`).then(r => r.json()),
       ]);
       setMetrics(metricsR);
       setTransactions(Array.isArray(txR) ? txR : []);
       setMissions(Array.isArray(missionsR) ? missionsR : []);
+      
+      // Load treasury and main wallet from settings
+      if (settingsR) {
+        setTreasuryWallet(settingsR.treasury_wallet || '');
+        setMainWallet(settingsR.main_wallet || '');
+        
+        // Load treasury balance
+        if (settingsR.treasury_wallet) {
+          try {
+            const balRes = await fetch(`${API}/solana-balance?owner=${settingsR.treasury_wallet}`);
+            const balData = await balRes.json();
+            if (balData.ok) {
+              setTreasuryBalance(balData.sol || 0);
+            }
+          } catch (e) {
+            console.error('Failed to load treasury balance:', e);
+          }
+        }
+      }
+      
       if (mintR.configured) {
         setMintCfg(mintR);
         const phR = await fetch(`${API}/price-history?mint=${mintR.mint}&limit=200`);
@@ -80,7 +109,7 @@ export default function Analytics() {
       console.error('Failed to load analytics data:', e);
     }
     setLoading(false);
-  }, [API]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -106,6 +135,112 @@ export default function Analytics() {
 
   const totalSweptUsd = (metrics?.total_swept_sol || 0) * SOL_USD;
   const latestTreasury = treasuryHistory[treasuryHistory.length - 1]?.balance || metrics?.latest_treasury_sol || 0;
+
+  // Treasury sweep handler - connects to Phantom wallet
+  const handleTreasurySweep = async () => {
+    if (!treasuryWallet || !mainWallet) {
+      setSweepResult({ type: 'error', message: 'Treasury or main wallet not configured in Settings' });
+      return;
+    }
+
+    if (treasuryBalance < 50.005) {
+      setSweepResult({ type: 'error', message: `Insufficient balance. Need 50.005 SOL (50 + 0.005 fee), have ${treasuryBalance.toFixed(4)} SOL` });
+      return;
+    }
+
+    setSweeping(true);
+    setSweepResult({ type: 'info', message: '🔐 Connecting to Phantom wallet...' });
+
+    try {
+      // Check if Phantom is installed
+      const { solana } = window;
+      if (!solana || !solana.isPhantom) {
+        setSweepResult({ type: 'error', message: 'Phantom wallet not found. Please install Phantom browser extension.' });
+        setSweeping(false);
+        return;
+      }
+
+      setSweepResult({ type: 'info', message: '🔐 Requesting wallet connection...' });
+      
+      // Connect to Phantom
+      const resp = await solana.connect();
+      const publicKey = resp.publicKey.toString();
+
+      // Verify connected wallet matches treasury wallet
+      if (publicKey.toLowerCase() !== treasuryWallet.toLowerCase()) {
+        setSweepResult({ 
+          type: 'error', 
+          message: `Wrong wallet connected! Expected treasury wallet ${treasuryWallet.slice(0, 8)}..., but got ${publicKey.slice(0, 8)}...` 
+        });
+        setSweeping(false);
+        return;
+      }
+
+      setSweepResult({ type: 'info', message: '📝 Creating transfer transaction...' });
+
+      // Create transfer transaction
+      const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+      const fromPubkey = new PublicKey(treasuryWallet);
+      const toPubkey = new PublicKey(mainWallet);
+
+      const transaction = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey,
+          toPubkey,
+          lamports: 50 * LAMPORTS_PER_SOL, // 50 SOL
+        })
+      );
+
+      transaction.feePayer = fromPubkey;
+      const { blockhash } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+
+      setSweepResult({ type: 'info', message: '✍️ Please sign the transaction in Phantom...' });
+
+      // Sign and send transaction
+      const signed = await solana.signAndSendTransaction(transaction);
+      
+      setSweepResult({ type: 'info', message: '⏳ Transaction submitted, waiting for confirmation...' });
+
+      // Wait for confirmation
+      await connection.confirmTransaction(signed.signature, 'confirmed');
+
+      setSweepResult({ 
+        type: 'success', 
+        message: `✅ Successfully swept 50 SOL to ${mainWallet.slice(0, 8)}...! Signature: ${signed.signature.slice(0, 16)}...` 
+      });
+
+      // Log the sweep in backend
+      try {
+        await fetch(`${API}/sweep`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: treasuryWallet,
+            to: mainWallet,
+            amount_sol: 50,
+            signature: signed.signature,
+          }),
+        });
+      } catch (e) {
+        console.error('Failed to log sweep:', e);
+      }
+
+      // Reload balances after 2 seconds
+      setTimeout(() => {
+        load();
+      }, 2000);
+
+    } catch (error) {
+      console.error('Sweep error:', error);
+      setSweepResult({ 
+        type: 'error', 
+        message: `Transaction failed: ${error.message || 'Unknown error'}` 
+      });
+    }
+
+    setSweeping(false);
+  };
 
   return (
     <div className="page-container fade-in">
@@ -204,22 +339,76 @@ export default function Analytics() {
                   </ResponsiveContainer>
                 ) : <EmptyChart height={200} />}
               </div>
-              {/* Sweep history summary */}
-              <div className="card">
-                <p className="section-label" style={{ marginBottom: 12 }}>SWEEP SUMMARY</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {[
-                    { l: 'Total sweeps', v: metrics?.tx_count || 0 },
-                    { l: 'SOL recovered', v: `${(metrics?.total_swept_sol || 0).toFixed(4)} SOL` },
-                    { l: 'USD value', v: `$${totalSweptUsd.toFixed(2)}` },
-                    { l: 'Price snapshots', v: metrics?.price_points || 0 },
-                    { l: 'Treasury snapshots', v: metrics?.treasury_snapshots || 0 },
-                  ].map(({ l, v }) => (
-                    <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#3a5070' }}>{l}</span>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: '#e8f0ff' }}>{v}</span>
-                    </div>
-                  ))}
+              {/* Treasury Sweep Action */}
+              <div className="card" data-testid="treasury-sweep-widget">
+                <p className="section-label" style={{ marginBottom: 14 }}>⚡ TREASURY SWEEP</p>
+                
+                {/* Current balances */}
+                <div style={{ marginBottom: 16, padding: 12, background: 'rgba(153,69,255,0.05)', borderRadius: 6, border: '1px solid rgba(153,69,255,0.2)' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#9945FF', marginBottom: 8 }}>TREASURY WALLET</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070', marginBottom: 8, wordBreak: 'break-all' }}>
+                    {treasuryWallet || 'Not configured'}
+                  </div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: '#14F195' }}>
+                    Balance: {treasuryBalance.toFixed(4)} SOL
+                    <span style={{ color: '#3a5070', fontSize: 10, marginLeft: 8 }}>
+                      ≈ ${(treasuryBalance * SOL_USD).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 16, padding: 12, background: 'rgba(20,241,149,0.05)', borderRadius: 6, border: '1px solid rgba(20,241,149,0.2)' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#14F195', marginBottom: 8 }}>DESTINATION (MAIN WALLET)</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070', wordBreak: 'break-all' }}>
+                    {mainWallet || 'Not configured in Settings'}
+                  </div>
+                </div>
+
+                {/* Sweep button */}
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%', marginBottom: 12 }}
+                  onClick={handleTreasurySweep}
+                  disabled={sweeping || !treasuryWallet || !mainWallet || treasuryBalance < 50.005}
+                  data-testid="sweep-50-sol-btn"
+                >
+                  {sweeping ? (
+                    <>
+                      <span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginRight: 8 }} />
+                      PROCESSING...
+                    </>
+                  ) : (
+                    <>⚡ SWEEP 50 SOL TO MAIN WALLET</>
+                  )}
+                </button>
+
+                {/* Status message */}
+                {sweepResult && (
+                  <div 
+                    style={{ 
+                      padding: 12, 
+                      borderRadius: 6, 
+                      background: sweepResult.type === 'success' ? 'rgba(20,241,149,0.1)' : 
+                                 sweepResult.type === 'error' ? 'rgba(255,96,96,0.1)' : 
+                                 'rgba(153,69,255,0.1)',
+                      border: `1px solid ${sweepResult.type === 'success' ? 'rgba(20,241,149,0.3)' : 
+                                          sweepResult.type === 'error' ? 'rgba(255,96,96,0.3)' : 
+                                          'rgba(153,69,255,0.3)'}`,
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 11,
+                      color: sweepResult.type === 'success' ? '#14F195' : 
+                             sweepResult.type === 'error' ? '#ff6060' : 
+                             '#9945FF',
+                      lineHeight: 1.5
+                    }}
+                  >
+                    {sweepResult.message}
+                  </div>
+                )}
+
+                {/* Help text */}
+                <div style={{ marginTop: 12, fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070', lineHeight: 1.5 }}>
+                  💡 This will transfer 50 SOL from your treasury to your main wallet. You must sign the transaction in Phantom wallet. Requires Phantom browser extension installed and connected to treasury wallet.
                 </div>
               </div>
             </div>
