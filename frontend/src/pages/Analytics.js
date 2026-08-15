@@ -277,17 +277,18 @@ export default function Analytics() {
         {!mintCfg && <span className="badge badge-amber">AWAITING MINT CONFIG</span>}
       </div>
 
-      {/* KPI row */}
+      {/* KPI row - REAL WALLET BALANCES */}
       <div className="grid-4 fade-in-2" style={{ marginBottom: 24 }}>
         {[
-          { l: 'TOTAL TRANSACTIONS', v: metrics?.tx_count ?? '--', c: '#e8f0ff' },
-          { l: 'SWEPT SOL (ALL TIME)', v: `${(metrics?.total_swept_sol || 0).toFixed(4)} SOL`, c: '#9945FF' },
-          { l: 'SWEPT USD VALUE', v: `$${totalSweptUsd.toFixed(2)}`, c: '#14F195' },
-          { l: 'SAVED MISSIONS', v: metrics?.mission_count ?? '--', c: '#F5A623' },
-        ].map(({ l, v, c }) => (
+          { l: 'TREASURY BALANCE', v: `${treasuryBalance.toFixed(6)} SOL`, c: '#9945FF', sub: treasuryWallet ? `${treasuryWallet.slice(0,4)}...${treasuryWallet.slice(-4)}` : '' },
+          { l: 'TOTAL TRANSACTIONS', v: metrics?.tx_count ?? '--', c: '#14F195', sub: 'All-time recorded' },
+          { l: 'COMBINED WALLET VALUE', v: `${treasuryBalance.toFixed(6)} SOL`, c: '#14F195', sub: `≈ $${(treasuryBalance * SOL_USD).toFixed(2)}` },
+          { l: 'SAVED MISSIONS', v: metrics?.mission_count ?? '--', c: '#F5A623', sub: 'Mission configs' },
+        ].map(({ l, v, c, sub }) => (
           <div key={l} className="stat-card">
             <div className="stat-value" style={{ background: `linear-gradient(135deg, #e8f0ff 0%, ${c} 100%)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', fontSize: 22 }}>{v}</div>
             <div className="stat-label">{l}</div>
+            {sub && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: '#3a5070', marginTop: 4 }}>{sub}</div>}
           </div>
         ))}
       </div>
