@@ -13,6 +13,7 @@ from typing import Optional, List, Any, Dict
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from revenue.system import RevenueSystem
+from achievements import AchievementTracker
 
 # Load environment BEFORE importing hub_sso (it reads HUB_AUTH_URL at import time)
 ROOT_DIR = Path(__file__).parent
@@ -28,6 +29,9 @@ db = db_mongo  # Alias for compatibility
 
 # Initialize Revenue System
 revenue_system = RevenueSystem(db_mongo)
+
+# Initialize Achievement Tracker
+achievement_tracker = AchievementTracker(db_mongo)
 
 # Import after revenue_system is created
 from revenue.live_tracker import LiveTracker
@@ -920,6 +924,56 @@ async def agents_phase_status(phase: str):
         raise HTTPException(status_code=400, detail=f"Invalid phase: {phase}")
     except Exception as e:
         logger.error(f"Phase status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ACHIEVEMENTS - Learning & Milestones from Background Loops
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_router.get("/achievements")
+async def get_achievements(
+    limit: int = Query(50, le=200),
+    category: Optional[str] = Query(None)
+):
+    """Get recent achievements from background loops and agents."""
+    try:
+        achievements = await achievement_tracker.get_recent(limit=limit, category=category)
+        return {
+            "ok": True,
+            "achievements": achievements,
+            "count": len(achievements)
+        }
+    except Exception as e:
+        logger.error(f"Achievements fetch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/achievements/summary")
+async def get_achievements_summary():
+    """Get achievement statistics and summary."""
+    try:
+        summary = await achievement_tracker.get_summary()
+        return {
+            "ok": True,
+            **summary
+        }
+    except Exception as e:
+        logger.error(f"Achievements summary error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.get("/achievements/agent/{agent_id}")
+async def get_agent_achievements(agent_id: str, limit: int = Query(20, le=100)):
+    """Get achievements for a specific agent."""
+    try:
+        achievements = await achievement_tracker.get_by_agent(agent_id, limit=limit)
+        return {
+            "ok": True,
+            "agent_id": agent_id,
+            "achievements": achievements,
+            "count": len(achievements)
+        }
+    except Exception as e:
+        logger.error(f"Agent achievements error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ─────────────────────────────────────────────────────────────────────────────

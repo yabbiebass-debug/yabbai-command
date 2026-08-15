@@ -90,7 +90,37 @@ class CycleAgent:
         # Persist cycle result
         await self.db.agent_cycles.insert_one(cycle_result)
 
+        # Record achievement for milestone cycles
+        if self.cycles_completed % 10 == 0:  # Every 10 cycles
+            await self._record_cycle_achievement(cycle_result)
+
         return cycle_result
+    
+    async def _record_cycle_achievement(self, cycle_result: Dict[str, Any]):
+        """Record achievement when reaching cycle milestones."""
+        try:
+            from achievements import AchievementTracker
+            tracker = AchievementTracker(self.db)
+            
+            # Determine what was learned
+            successful_phases = [p for p, r in cycle_result["phase_results"].items() if not r.get("error")]
+            learning = f"Agent completed {self.cycles_completed} cycles. Success rate: {len(successful_phases)}/5 phases. Total revenue: ${self.revenue_generated:.2f}"
+            
+            await tracker.record(
+                category="agent",
+                milestone=f"Agent {self.agent_id[:8]} reached {self.cycles_completed} cycles",
+                learning=learning,
+                result={
+                    "cycles_completed": self.cycles_completed,
+                    "revenue_generated": self.revenue_generated,
+                    "successful_phases": len(successful_phases),
+                    "total_phases": 5
+                },
+                agent_id=self.agent_id,
+                phase=self.current_phase.value
+            )
+        except Exception as e:
+            logger.error(f"Failed to record achievement: {e}")
 
     async def execute_phase(self, phase: Phase) -> Dict[str, Any]:
         """Execute specific phase logic."""
