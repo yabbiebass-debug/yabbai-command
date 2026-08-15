@@ -1,12 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 const HUB_LOGIN = 'https://yabbai.network/login/index.html';
 
 export function useDirectorAuth() {
   const [isAuthorized, setIsAuthorized] = useState(null);
   const [user, setUser] = useState(null);
+  const hasChecked = useRef(false);
 
   useEffect(() => {
+    // Prevent multiple auth checks (which cause redirect loops)
+    if (hasChecked.current) return;
+    hasChecked.current = true;
+
     const checkAuth = async () => {
       try {
         const response = await fetch('/api/auth/me', { credentials: 'include' });
@@ -17,16 +22,21 @@ export function useDirectorAuth() {
           document.documentElement.dataset.director = '1';
         } else {
           // Not authorized - redirect to hub login
-          window.location.replace(
-            HUB_LOGIN + '?next=' + encodeURIComponent(window.location.href)
-          );
+          // Add a small delay to prevent rapid redirect loops
+          setTimeout(() => {
+            window.location.replace(
+              HUB_LOGIN + '?next=' + encodeURIComponent(window.location.href)
+            );
+          }, 500);
         }
       } catch (error) {
         console.error('Auth check failed:', error);
-        // Fail closed - redirect to login
-        window.location.replace(
-          HUB_LOGIN + '?next=' + encodeURIComponent(window.location.href)
-        );
+        // Fail closed - redirect to login with delay
+        setTimeout(() => {
+          window.location.replace(
+            HUB_LOGIN + '?next=' + encodeURIComponent(window.location.href)
+          );
+        }, 500);
       }
     };
 
