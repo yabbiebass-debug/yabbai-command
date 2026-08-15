@@ -1,4 +1,4 @@
-# plan.md — YABBAI (FARM stack) — Scale-up Roadmap (Updated)
+# plan.md — YABBAI Command Centre (FARM stack) — Scale-up Roadmap (Updated)
 
 ## 1) Objectives
 - ✅ Port the provided reference UI/UX to FARM: **FastAPI + React + MongoDB**.
@@ -24,36 +24,41 @@
   - Skeleton loading components
 
 **NEW governing objective (Data Integrity / Truth Mode)**
-- ✅ Convert the entire site to **REAL DATA ONLY**.
-  - ✅ Remove/disable all mock/simulated/fabricated numeric displays (no `Math.random()`-driven metrics, no fake prices/latency/ROI, no seeded candles).
+- ⚠️ **Partially shipped; audit not complete project-wide.**
+  - ✅ Remove/disable mock/simulated/fabricated numeric displays in key pages already touched.
   - ✅ If data is not available, UI must show **Not Connected**, **Configure in Settings**, or **DATA GAP** (never default to `0` when unknown).
   - ✅ Mock data may only remain in explicitly labeled **AI/learning** components; it must be visually and textually labeled as **Learning/Simulation** and must not be mixed into “real” totals.
   - ✅ Any simulation mode must show an explicit disclosure banner.
 
-**Current status**
-- App is live (preview): https://yabbai-command.preview.emergentagent.com
-- ✅ Phase 1 + Phase 2 completed (MVP fully tested).
-- ✅ Withdraw + Wallet updated for **sweep/recovery** flows.
-- ✅ Backend upgraded for Phase 3+4:
-  - MongoDB endpoints added for `settings`, `missions`, `transactions`, `treasury snapshots`, `price history`, and `sweep` logging.
-  - SlowAPI rate limiting + in-memory caching scaffolding exists.
-- ✅ Frontend Phase 3+4 files created:
-  - `ToastContext.js`, `CopyButton.js`, `Skeleton.js`
-  - New pages: `Settings.js`, `Analytics.js`
-  - `Mission.js` and `Promo.js` upgraded to use backend APIs
-- ✅ CommandCentre fetches backend data (`/api/revenue/status`, `/api/agents/status`, `/api/revenue/live/status`) for headline stats.
-- ✅ Payment.js is real-data-only (Truth Protocol enforced; reconciled totals only).
+**NEW governing objective (Hub SSO / Zero-credential spoke)**
+- ✅ Command app stores **zero credentials** and does not implement login/signup/password/OAuth.
+- ✅ Hub (`https://yabbai.network`) is the sole identity provider.
+- ✅ Command backend verifies sessions live against hub via `hub_sso.py` (verbatim).
+- ✅ Fail closed:
+  - `HUB_AUTH_URL` unset ⇒ **503**
+  - Not authenticated ⇒ **401**
+- ✅ Import-order fix applied and verified: `load_dotenv()` runs **before** importing `hub_sso`.
+- ✅ Director-only protection enforced:
+  - ✅ Backend: sensitive routes require `Depends(require_director)`
+  - ✅ Frontend: all routes wrapped with `ProtectedRoute`
+- ✅ SSO verification/testing completed in preview (within honest limits of cookie scoping).
 
-**Truth Mode conversion — COMPLETE**
-- ✅ `YabbaiApp.js`: removed seeded candles / simulated price; added SIMULATION MODE banner and DATA GAP states when unconfigured; uses `/api/price-history` + `/api/jupiter-price` when configured.
-- ✅ `ApiPulse.js`: removed random status/latency/calls; uses real backend health endpoint.
-- ✅ Backend: added `/api/health/details` endpoint measuring MongoDB, Solana RPC, Jupiter reachability, Revenue System, and Agent Pool status.
-- ✅ `Basham.js`: removed random wealth scoring; score is calculated from the user’s answers (real input-based).
-- ✅ `CommandCentre.js`: already real data; randomness remains only in clearly documented visual-only animations.
-- ✅ `Launch.js` + `Mission.js`: randomness retained only as UX pacing for console/typewriter effects (documented).
-- ✅ Frontend compiles successfully (esbuild).
-- ✅ Screenshots captured to confirm Truth Mode display.
-- 🧪 Comprehensive E2E testing agent invoked to validate across routes.
+**Current status**
+- Preview app: https://yabbai-command.preview.emergentagent.com
+- Production app: https://command.yabbai.network (operator-managed deploy)
+
+**Verified recently (preview / supervised backend)**
+- ✅ Fixed Hub SSO import ordering in `/app/backend/server.py` so dotenv loads before `hub_sso` import.
+- ✅ `/api/auth/me` returns **401** with no cookie when `HUB_AUTH_URL` is configured (previously incorrect **503**).
+- ✅ Frontend compilation passes after wiring `ProtectedRoute` into `App.js`.
+- ✅ Testing agent run passed 100% for backend + frontend SSO gating and sensitive route protection (`/app/test_reports/iteration_8.json`).
+
+**Operator actions (production secrets panel)**
+- Required in **yabbai-command** deployment secrets panel:
+  - `HUB_AUTH_URL=https://yabbai.network`
+- Required in **hub** deployment secrets panel (if not already done):
+  - `COOKIE_DOMAIN=.yabbai.network`
+- No API keys/tokens/credentials are needed for SSO beyond these environment values.
 
 ---
 
@@ -123,35 +128,24 @@
 ---
 
 ### Phase 3 — Hardening + Production polish (IN PROGRESS)
-Goal: reduce warnings, improve resilience/performance, and tighten UX edge cases while preparing for DB-backed features.
+Goal: reduce warnings, improve resilience/performance, and tighten UX edge cases while preparing for production-grade gating.
 
 **Engineering hardening**
-- ✅ Added global toast notification system (`ToastContext.js`) (not yet wired into router).
+- ✅ Added global toast notification system (`ToastContext.js`).
+- ✅ Wired `ToastProvider` into `App.js`.
 - ✅ Added UI utilities: `CopyButton`, `Skeleton`.
-- [ ] Wire `ToastProvider` into `App.js` so all pages can show consistent error UX.
 - [ ] Introduce standardized API error handling via a small `apiClient` wrapper (recommended) or consistent inline fetch handling.
-- [ ] Prioritize error UX:
-  - show toasts for 429 Too Many Requests (rate limiting)
-  - show toasts for network failures/timeouts
-  - suggest retry after short delay or switch RPC if configured
+
+**Security / MVP hygiene**
+- ✅ SlowAPI rate limiting added to backend.
+- [ ] Make CORS origin list environment-driven for production.
 
 **Performance**
 - [ ] Re-audit all `setInterval` and RAF loops; ensure teardown on unmount.
 - [ ] Pause/reduce animation work on hidden tab (`document.visibilityState`).
 
-**Security / MVP hygiene**
-- ✅ Strengthened server-side validation patterns.
-- ✅ SlowAPI rate limiting added to backend.
-- [ ] Make CORS origin list environment-driven for production.
-
-**UX polish**
-- ✅ CopyButton utility component.
-- ✅ Skeleton/loading components exist.
-- [ ] Apply skeletons + toasts to key fetches (wallet balance, sweeps, analytics loads).
-
 **Phase 3 testing**
-- [ ] Re-run E2E regression across all routes after wiring.
-- [ ] Add targeted tests for sweep UX edge cases.
+- [ ] Re-run E2E regression across all routes after any additional wiring.
 
 ---
 
@@ -172,7 +166,7 @@ Mongo-backed collections and APIs now exist for:
 - ✅ SlowAPI limits enabled.
 - ✅ In-memory caching (TTL) implemented for hot endpoints.
 
-#### 4.3 Frontend: New pages ✅ CREATED (wiring pending)
+#### 4.3 Frontend: New pages ✅ CREATED
 - ✅ **`/settings`** page created
 - ✅ **`/analytics`** page created
 
@@ -186,7 +180,7 @@ Mongo-backed collections and APIs now exist for:
   - surface persisted transaction history (not only session)
 
 #### 4.5 Shared UX utilities (IN PROGRESS)
-- ✅ Toast system implemented.
+- ✅ Toast system implemented and wired.
 - ✅ CopyButton implemented.
 - ✅ Skeleton components implemented.
 - [ ] Add a shared `apiClient` wrapper to normalize errors and prioritize **429** handling.
@@ -197,7 +191,7 @@ Mongo-backed collections and APIs now exist for:
 
 ---
 
-### Phase 5 — Truth Mode / Real-Data-Only Conversion ✅ COMPLETE (P0 shipped)
+### Phase 5 — Truth Mode / Real-Data-Only Conversion (P0 shipped; audit incomplete)
 Goal: enforce the user directive: **everything on the site must be real data**; mock data is seized/removed from user-facing metrics.
 
 #### 5.1 Define “Real Data” contract (Truth Mode) ✅ DONE
@@ -205,63 +199,112 @@ Goal: enforce the user directive: **everything on the site must be real data**; 
 - ✅ Unknown/unconfigured renders **Not Connected / Configure / DATA GAP**.
 - ✅ Learning/simulation is allowed only if segregated and clearly labeled.
 
-#### 5.2 Page-by-page mock removal (frontend) ✅ DONE
+#### 5.2 Page-by-page mock removal (frontend) ⚠️ PARTIAL / NOT FULLY AUDITED
 - ✅ **YabbaiApp.js**: removed simulation candles and fake price; added SIMULATION MODE banner + DATA GAP; uses real endpoints.
 - ✅ **ApiPulse.js**: removed random metrics; now reads `/api/health/details`.
 - ✅ **Basham.js**: removed random wealth score; now calculated from user answers.
-- ✅ **CommandCentre.js**: metrics are real; randomness exists only for non-metric visuals with explicit comments.
-- ✅ **Launch.js / Mission.js**: randomness retained only for UX pacing; documented.
+- ✅ **CommandCentre.js**: randomness remains only for non-metric visuals with explicit comments.
+- ⚠️ Additional pages/components still require audit; do not claim full project-wide mock-data removal.
 
 #### 5.3 Backend support for Truth Mode ✅ DONE
 - ✅ Added `/api/health/details` for real reachability/latency monitoring.
-- ✅ Truth Protocol verified: only `payment_processor` source counts as real income.
+- ✅ Jupiter price migrated to `/price/v3` parsing (`usdPrice`) (do not expose any API credentials).
 
 #### 5.4 Verification & regression (IN PROGRESS)
-- ✅ Grep-based audit performed for `Math.random` usage; removed from metric displays.
 - ✅ Frontend compile passes.
-- 🧪 Testing agent invoked for comprehensive E2E validation.
+- ✅ Some testing-agent runs exist historically, and SSO regression is now verified; Truth Mode still needs broader audit if/when prioritized.
+
+---
+
+### Phase 6 — Hub SSO (Director-only spoke) ✅ COMPLETE
+Goal: Command app is a **spoke** relying on **hub live verification**; stores **zero credentials**.
+
+#### 6.1 Patch integration ✅ COMPLETE
+- ✅ `backend/hub_sso.py` present and preserved **verbatim**.
+- ✅ SSO router mounted in backend and exposes:
+  - `/api/auth/me`
+  - `/api/auth/logout`
+- ✅ `frontend/src/components/ProtectedRoute.js` implemented per patch requirements.
+- ✅ `frontend/public/shared/sso-gate.js` present (static-page reference; SPA uses ProtectedRoute).
+
+#### 6.2 Environment config ✅ COMPLETE (preview)
+- ✅ `/app/backend/.env` contains `HUB_AUTH_URL="https://yabbai.network"`.
+- ✅ **Import-order fix applied** so dotenv loads before `hub_sso` import.
+- ✅ Supervised backend now returns:
+  - `/api/auth/me` (no cookie) ⇒ **401** (expected)
+
+#### 6.3 Backend protection audit ✅ COMPLETE
+Requirement: **every sensitive route must include** `user: dict = Depends(require_director)`.
+- ✅ Protected sensitive write routes including:
+  - token mint POST/DELETE
+  - settings GET/POST
+  - missions POST/PUT/DELETE
+  - transactions POST
+  - price snapshot POST
+  - treasury snapshot POST
+  - events POST
+  - sweep POST
+  - revenue dashboard GET
+  - revenue compliance check POST
+
+> Note: Webhook endpoints remain unauthenticated by Director by design; they must rely on webhook signature verification (future hardening item).
+
+#### 6.4 Frontend protection audit ✅ COMPLETE
+- ✅ `ProtectedRoute` is used in `App.js` and wraps all routes.
+- ✅ Auth check uses `fetch('/api/auth/me', { credentials: 'include' })`.
+- ✅ On failure, redirects to `https://yabbai.network/login/index.html?next=<encoded_current_url>`.
+- ✅ No local login UI or credential storage.
+
+#### 6.5 Testing (honest limits) ✅ COMPLETE (preview scope)
+- ✅ Preview cannot validate cookie-based browser SSO due to cookie scoping.
+- ✅ SSO integration regression verified by testing agent:
+  - `/api/auth/me` returns 401 without cookie
+  - Sensitive routes return 401 without auth
+  - ProtectedRoute redirects to hub login
+  - Import-order fix confirmed
+  - Report: `/app/test_reports/iteration_8.json`
+
+#### 6.6 Production operator steps (required) ⏳ PENDING
+- [ ] In **yabbai-command** deployment secrets panel:
+  - `HUB_AUTH_URL=https://yabbai.network`
+- [ ] In **hub** deployment secrets panel (if not already set):
+  - `COOKIE_DOMAIN=.yabbai.network`
+- [ ] Redeploy hub (if cookie-domain change not deployed yet), then redeploy command.
+- [ ] Production browser test (deployed domains only):
+  - Fresh browser → open `https://command.yabbai.network` → bounce to hub login → Google → Authenticator → return to command.
 
 ---
 
 ## 3) Next Actions (Updated priorities)
 
-**P0 — Finish Truth Mode validation**
-1. Review testing agent output and fix any regressions.
-2. Add a lightweight CI-style “Truth Audit” script:
-   - fail build if `Math.random` is used in non-visual metric contexts
-   - flag hard-coded currency values that are not sourced
+### P0 — Production rollout verification (operator-owned)
+1. Operator sets deployment secrets:
+   - command: `HUB_AUTH_URL=https://yabbai.network`
+   - hub (if needed): `COOKIE_DOMAIN=.yabbai.network`
+2. Operator redeploys hub (if cookie-domain change needed) then command.
+3. Operator performs the real browser SSO flow test on `https://command.yabbai.network`:
+   - bounce → hub login → Google → Authenticator → return to command
+4. If any step fails, record which step and the observed behavior for hub-side tracing.
 
-**P0 — Wire + harden**
-3. Wire `ToastProvider` into `App.js`.
-4. Add a shared `apiClient` wrapper with strong error handling (429 + network timeouts).
+### P1 — Security hardening follow-ups (recommended)
+5. Add webhook signature verification for `/api/revenue/webhooks/*` endpoints (do not use Director auth; use provider signatures).
+6. Consider applying `require_director` to additional operational endpoints as needed (e.g., any admin/status endpoints that should not be public).
 
-**P1 — Persisted transaction history + sweep logging**
-5. Ensure Wallet/Withdraw actions are persisted and displayed (DB-backed history).
+### P1 — Product hardening follow-ups (optional)
+7. Add a shared `apiClient` wrapper with strong error handling (429 + network timeouts).
+8. Re-run E2E regression across all routes after any hardening changes.
 
-**P1 — Additional hardening**
-6. Reduce animation load on hidden tabs.
-7. Make CORS origin list environment-driven.
-8. Optional: refresh Browserslist DB in dev environment.
+> Per current priority, skip broader site-wide Truth Mode/data audit for now.
 
 ---
 
 ## 4) Success Criteria (Updated)
 - ✅ All current routes render with correct theme + animations.
-- ✅ Sweep/Fund recovery works: connected wallet → destination → presets/MAX SAFE → confirmed tx.
-- ✅ **Truth Mode (Real Data Only)**:
-  - ✅ no user-facing fake numbers
-  - ✅ no `Math.random()`-driven metrics
-  - ✅ token page shows disclosure + DATA GAP when unconfigured
-  - ✅ unknowns show **Not Connected / Configure / DATA GAP**
-  - ✅ learning/simulation data is clearly labeled and segregated
-- Phase 3 complete when:
-  - no critical console errors
-  - global toasts integrated
-  - 429 rate limiting errors displayed clearly and consistently
-- Phase 4 complete when:
-  - settings, missions, transactions persist to MongoDB
-  - sweeps stored and displayed as history
-  - price + treasury snapshots populate analytics (from real sources only)
-  - `/settings` and `/analytics` accessible via routes + nav
-  - Command Centre + Token App backend-driven where applicable
-  - E2E regression passes
+- ✅ **Hub SSO env/import behavior:**
+  - `/api/auth/me` returns **401** with no cookie when configured.
+  - `HUB_AUTH_URL` unset returns **503** (fail-closed).
+- ✅ **Backend security:** all sensitive routes require `Depends(require_director)`.
+- ✅ **Frontend security:** all Director-only pages enforce auth via `ProtectedRoute` and redirect to hub login.
+- ✅ **Preview verification complete:** testing-agent regression confirms SSO and gating coverage (iteration_8).
+- ⏳ **Production deploy correctness (operator):** with secrets set and redeployed, a fresh browser visits `https://command.yabbai.network` and completes:
+  - bounce → hub login → Google → Authenticator → return to command.

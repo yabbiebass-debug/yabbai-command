@@ -14,11 +14,12 @@ from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from revenue.system import RevenueSystem
 
-# Hub SSO Integration
-from hub_sso import router as sso_router, require_director
-
+# Load environment BEFORE importing hub_sso (it reads HUB_AUTH_URL at import time)
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+# Hub SSO Integration
+from hub_sso import router as sso_router, require_director
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -183,7 +184,7 @@ async def get_token_mint():
     return doc or {"configured": False}
 
 @api_router.post("/token-mint")
-async def save_token_mint(body: TokenMintUpdate):
+async def save_token_mint(body: TokenMintUpdate, user: dict = Depends(require_director)):
     if not is_valid_base58(body.mint):
         raise HTTPException(400, "Invalid mint address format")
     doc = {
@@ -199,7 +200,7 @@ async def save_token_mint(body: TokenMintUpdate):
     return doc
 
 @api_router.delete("/token-mint")
-async def delete_token_mint():
+async def delete_token_mint(user: dict = Depends(require_director)):
     await db.token_mint_config.delete_many({})
     return {"ok": True}
 
@@ -234,7 +235,7 @@ async def list_missions():
     return [serialize(d) for d in docs]
 
 @api_router.post("/missions")
-async def create_mission(body: MissionBody):
+async def create_mission(body: MissionBody, user: dict = Depends(require_director)):
     doc = body.dict()
     doc["created_at"] = utcnow()
     doc["deployed_count"] = 0
@@ -244,7 +245,7 @@ async def create_mission(body: MissionBody):
     return doc
 
 @api_router.put("/missions/{mission_id}")
-async def update_mission(mission_id: str, body: MissionBody):
+async def update_mission(mission_id: str, body: MissionBody, user: dict = Depends(require_director)):
     try:
         oid = ObjectId(mission_id)
     except Exception:
@@ -257,7 +258,7 @@ async def update_mission(mission_id: str, body: MissionBody):
     return {"ok": True, "id": mission_id}
 
 @api_router.delete("/missions/{mission_id}")
-async def delete_mission(mission_id: str):
+async def delete_mission(mission_id: str, user: dict = Depends(require_director)):
     try:
         oid = ObjectId(mission_id)
     except Exception:
@@ -273,7 +274,7 @@ async def list_transactions(limit: int = Query(50, le=200)):
     return [serialize(d) for d in docs]
 
 @api_router.post("/transactions")
-async def record_transaction(body: TransactionBody):
+async def record_transaction(body: TransactionBody, user: dict = Depends(require_director)):
     doc = body.dict()
     doc["created_at"] = utcnow()
     result = await db.transactions.insert_one(doc)
@@ -291,7 +292,7 @@ async def get_price_history(mint: str, limit: int = Query(100, le=500)):
     return {"ok": True, "points": [{"price": d["price"], "ts": d["ts"].isoformat() if isinstance(d["ts"], datetime) else d["ts"]} for d in docs]}
 
 @api_router.post("/price-snapshot")
-async def add_price_snapshot(body: PriceSnapshotBody):
+async def add_price_snapshot(body: PriceSnapshotBody, user: dict = Depends(require_director)):
     if not is_valid_base58(body.mint):
         raise HTTPException(400, "Invalid mint")
     doc = {"mint": body.mint, "price": body.price, "ts": datetime.now(timezone.utc)}
@@ -313,7 +314,7 @@ async def get_treasury_snapshots(limit: int = Query(100, le=500)):
     return [{"balance_sol": d["balance_sol"], "balance_usd": d.get("balance_usd"), "address": d.get("address"), "ts": d["ts"].isoformat() if isinstance(d["ts"], datetime) else d["ts"]} for d in docs]
 
 @api_router.post("/treasury-snapshot")
-async def add_treasury_snapshot(body: TreasurySnapshotBody):
+async def add_treasury_snapshot(body: TreasurySnapshotBody, user: dict = Depends(require_director)):
     doc = {"address": body.address, "balance_sol": body.balance_sol, "balance_usd": body.balance_usd, "ts": datetime.now(timezone.utc)}
     await db.treasury_snapshots.insert_one(doc)
     count = await db.treasury_snapshots.count_documents({})
@@ -331,7 +332,7 @@ async def get_events(limit: int = Query(40, le=200)):
     return [{"id": str(d["_id"]), "text": d["text"], "color": d.get("color", ""), "category": d.get("category", "system"), "ts": d["ts"].isoformat() if isinstance(d["ts"], datetime) else d["ts"]} for d in docs]
 
 @api_router.post("/events")
-async def add_event(body: EventBody):
+async def add_event(body: EventBody, user: dict = Depends(require_director)):
     doc = {"text": body.text, "color": body.color, "category": body.category, "ts": datetime.now(timezone.utc)}
     result = await db.events.insert_one(doc)
     count = await db.events.count_documents({})
@@ -601,7 +602,7 @@ async def revenue_reject_action(
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.post("/revenue/compliance/check")
-async def revenue_check_compliance(request: Request):
+async def revenue_check_compliance(request: Request, user: dict = Depends(require_director)):
     """Check text for compliance violations."""
     try:
         data = await request.json()

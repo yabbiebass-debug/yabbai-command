@@ -1,10 +1,10 @@
 [
   {
-    "content": "Take screenshots of all updated pages to verify real-data-only display",
+    "content": "Run bearer-token test per README_PATCH.md and document raw results",
     "status": "completed"
   },
   {
-    "content": "Call testing agent for comprehensive E2E validation",
-    "status": "pending"
+    "content": "Call testing_agent for comprehensive SSO and route protection verification",
+    "status": "completed"
   }
 ]
