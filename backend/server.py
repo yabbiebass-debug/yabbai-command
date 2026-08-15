@@ -361,11 +361,12 @@ async def get_jupiter_price(request: Request, mint: str):
     
     try:
         async with httpx.AsyncClient(timeout=8.0) as h:
-            resp = await h.get("https://api.jup.ag/price/v2", params={"ids": mint}, headers=headers)
+            resp = await h.get("https://api.jup.ag/price/v3", params={"ids": mint}, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
-                price_data = data.get("data", {}).get(mint, {})
-                price = price_data.get("price")
+                # v3 format: {mint: {usdPrice: ...}} instead of {data: {mint: {price: ...}}}
+                price_data = data.get(mint, {})
+                price = price_data.get("usdPrice") or price_data.get("price")
                 if price is not None:
                     p = float(price)
                     PRICE_CACHE[mint] = {"price": p, "ts": time.time()}
@@ -987,25 +988,26 @@ async def check_jupiter_health() -> dict:
             
         start = time.time()
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get("https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=1000000", headers=headers)
+            # Test with SOL price lookup
+            resp = await client.get("https://api.jup.ag/price/v3?ids=So11111111111111111111111111111111111111112", headers=headers)
         latency_ms = int((time.time() - start) * 1000)
         return {
             "id": "jup",
-            "name": "Jupiter Price",
+            "name": "Jupiter Price API",
             "category": "DEX",
             "status": "live" if resp.status_code == 200 else "error",
             "latency": latency_ms,
-            "url": "quote-api.jup.ag"
+            "url": "api.jup.ag/price/v3"
         }
     except Exception as e:
         return {
             "id": "jup",
-            "name": "Jupiter Price",
+            "name": "Jupiter Price API",
             "category": "DEX",
             "status": "error",
             "latency": 0,
             "error": str(e),
-            "url": "quote-api.jup.ag"
+            "url": "api.jup.ag/price/v3"
         }
 
 async def check_revenue_system_health() -> dict:
