@@ -76,6 +76,7 @@ export default function YabbaiApp() {
   const [toggles, setToggles] = useState({ selfImprove: true, autoReinvest: true });
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
+  const [agentPool, setAgentPool] = useState(null);
   const mintRef = useRef(null);
 
   // Load token mint config
@@ -164,6 +165,20 @@ export default function YabbaiApp() {
     const id = setInterval(load, 60000);
     return () => clearInterval(id);
   }, [mintCfg]);
+
+  // Real agent pool state. Replaces the hardcoded phase progress bars.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch(`${API}/agents/status`, { credentials: 'include' })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => { if (!cancelled && d) setAgentPool(d); })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   const handleSweep = async () => {
     if (!mintCfg?.configured) {
@@ -419,35 +434,79 @@ export default function YabbaiApp() {
               >{s}%</button>
             ))}
           </div>
-          <button className="btn btn-green" style={{ width: '100%' }} disabled={!mintCfg?.configured || !currentPrice}>
-            {mintCfg?.configured ? 'Swap via Jupiter' : 'Configure Token First'}
-          </button>
+          {/* This button had no onClick — it was inert. Executing a swap needs a
+              connected wallet, a live route quote and signing, none of which this
+              page does. Rather than fake it, hand off to Jupiter, which performs
+              the actual swap with real routing and real slippage. */}
+          <a
+            href={mintCfg?.configured
+              ? `https://jup.ag/swap/USDC-${mintCfg.mint}${swapAmt ? `?inAmount=${swapAmt}` : ''}`
+              : undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-green"
+            style={{
+              width: '100%', display: 'block', textAlign: 'center',
+              textDecoration: 'none', boxSizing: 'border-box',
+              pointerEvents: mintCfg?.configured ? 'auto' : 'none',
+              opacity: mintCfg?.configured ? 1 : 0.5,
+            }}
+          >
+            {mintCfg?.configured ? 'Open in Jupiter ↗' : 'Configure Token First'}
+          </a>
           {currentPrice && (
-            <div style={{ marginTop: 10, fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070' }}>
-              Rate: 1 USDC = {(1 / currentPrice).toFixed(2)} TOKEN • Fee: 0.35%
+            <div style={{ marginTop: 10, fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070', lineHeight: 1.5 }}>
+              Indicative only: {(1 / currentPrice).toFixed(2)} TOKEN per USDC at the
+              current quoted price. The real rate depends on route, pool depth and
+              slippage, and is shown by Jupiter at execution.
             </div>
           )}
         </div>
 
-        {/* Mission Phase - REAL DATA ONLY (Remove fake yield) */}
+        {/* Agent pool phases, read from /api/agents/status.
+            This previously rendered a hardcoded array: PUMP and ESKY permanently
+            COMPLETE, MISSION permanently ACTIVE at 68%. Those values described
+            nothing — no phase has a completion percentage, and the pool does not
+            progress through them in sequence. Every agent walks all five phases
+            each cycle. Cycle counts are real; progress bars were not. */}
         <div className="card">
-          <p className="section-label" style={{ marginBottom: 14 }}>MISSION PHASE</p>
-          {[{ phase: 'PUMP', status: 'COMPLETE', pct: 100, col: '#14F195' },
-            { phase: 'ESKY', status: 'COMPLETE', pct: 100, col: '#14F195' },
-            { phase: 'MISSION', status: 'ACTIVE', pct: 68, col: '#9945FF' },
-            { phase: 'SCALE', status: 'PENDING', pct: 0, col: '#3a5070' },
-            { phase: 'WITHDRAW', status: 'PENDING', pct: 0, col: '#3a5070' },
-          ].map(({ phase, status, pct, col }) => (
-            <div key={phase} style={{ marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: col }}>{phase}</span>
-                <span className="badge" style={{ background: 'transparent', border: 'none', color: col, padding: 0, fontSize: 10 }}>{status}</span>
-              </div>
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${pct}%`, background: col }} />
-              </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
+            <p className="section-label" style={{ margin: 0 }}>AGENT POOL — BY PHASE</p>
+            {agentPool?.total_agents != null && (
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070' }}>
+                {agentPool.total_agents} agents · {agentPool.total_cycles?.toLocaleString()} cycles
+              </span>
+            )}
+          </div>
+
+          {!agentPool ? (
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#3a5070', padding: '8px 0' }}>
+              DATA GAP — agent pool status unavailable
             </div>
-          ))}
+          ) : (
+            ['pump', 'esky', 'mission', 'scale', 'withdraw'].map(phase => {
+              const p = agentPool.phase_breakdown?.[phase] || {};
+              const active = p.active_agents ?? 0;
+              const cycles = p.total_cycles ?? 0;
+              return (
+                <div key={phase} style={{ marginBottom: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: active > 0 ? '#14F195' : '#3a5070' }}>
+                      {phase.toUpperCase()}
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#8fa3bf' }}>
+                      {active} active · {cycles.toLocaleString()} cycles
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+
+          <p style={{ fontSize: 11, color: '#8fa3bf', lineHeight: 1.5, marginTop: 10 }}>
+            Cycle counts measure activity, not income. No phase places a trade or
+            collects a fee, so the pool reports $0.00 revenue by design.
+          </p>
           <div className="divider" />
           {/* Note: Yield tracking would come from real revenue backend integration */}
           <div style={{ textAlign: 'center' }}>
