@@ -17,6 +17,17 @@ from achievements import AchievementTracker
 from solana_live import SolanaLive, jupiter_price as live_jupiter_price
 from performance import treasury_performance
 from dexscreener import market as dex_market, gaps as dex_gaps
+from revenue.ledger_store import (
+    persist as ledger_persist,
+    load_all as ledger_load_all,
+    totals as ledger_totals,
+    ensure_indexes as ledger_ensure_indexes,
+)
+from revenue.webhook_auth import (
+    verify as wh_verify,
+    configured_sources as wh_configured_sources,
+)
+import json
 
 # Load environment BEFORE importing hub_sso (it reads HUB_AUTH_URL at import time)
 ROOT_DIR = Path(__file__).parent
@@ -1087,43 +1098,85 @@ async def revenue_run_cycle(authorization: Optional[str] = Header(None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Webhooks (signed for production - basic version for now)
-@api_router.post("/revenue/webhooks/product-sale")
-async def revenue_webhook_product_sale(request: Request):
-    """Product sale webhook (Stripe, Gumroad, etc.)."""
+async def _verified_webhook_body(request: Request, source: str) -> Dict[str, Any]:
+    """Read and verify a webhook body, or reject it.
+
+    These endpoints book REAL income into the truth ledger, and real_income() is
+    what the withdraw phase reads to decide whether to propose a payout. Left
+    open, anyone who guessed the URL could inflate it. Director auth is the wrong
+    control here because a payment processor cannot hold a hub session, so this
+    uses an HMAC over the raw body instead. Fails closed.
+    """
+    raw = await request.body()
+    ok, reason = wh_verify(
+        source,
+        raw,
+        request.headers.get("x-signature") or request.headers.get("x-hub-signature-256"),
+        request.headers.get("x-timestamp"),
+    )
+    if not ok:
+        logger.warning(f"rejected {source} webhook: {reason}")
+        raise HTTPException(status_code=401, detail=f"webhook rejected: {reason}")
     try:
-        data = await request.json()
+        return json.loads(raw or b"{}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid JSON body: {e}")
+
+
+@api_router.get("/revenue/webhooks/status")
+async def revenue_webhook_status(user: dict = Depends(require_director)):
+    """Which webhook sources have a secret configured. Secrets are never returned."""
+    return {
+        "ok": True,
+        "sources": wh_configured_sources(),
+        "note": (
+            "Webhooks fail closed. Without a secret, income cannot be booked from "
+            "any source. Set WEBHOOK_SECRET, or WEBHOOK_SECRET_<SOURCE> per source."
+        ),
+    }
+
+
+@api_router.post("/revenue/webhooks/product-sale")
+@limiter.limit("60/minute")
+async def revenue_webhook_product_sale(request: Request):
+    """Product sale webhook (Stripe, Gumroad, etc.). Signature required."""
+    data = await _verified_webhook_body(request, "product")
+    try:
         result = revenue_system.handle_product_sale(data)
-        
-        # Track in live system
+
         if result.get("ok"):
+            # Durable first: an in-memory ledger loses this on the next restart,
+            # and Render's free tier sleeps after ~15 minutes idle.
+            await ledger_persist(db, revenue_system.ledger._entries[-1])
             await live_tracker.track_income(
                 source="product_sale",
                 amount=result.get("booked_usd", 0),
                 data=data
             )
             await live_tracker.track_metric(result.get("metric", {}))
-        
+
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"Revenue product sale webhook error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.post("/revenue/webhooks/invoice-paid")
+@limiter.limit("60/minute")
 async def revenue_webhook_invoice_paid(request: Request):
-    """Invoice paid webhook (for agency services)."""
+    """Invoice paid webhook (for agency services). Signature required."""
+    data = await _verified_webhook_body(request, "invoice")
     try:
-        data = await request.json()
         result = revenue_system.handle_invoice_paid(data)
-        
-        # Track in live system
+
         if result.get("ok"):
+            await ledger_persist(db, revenue_system.ledger._entries[-1])
             await live_tracker.track_income(
                 source="invoice_paid",
                 amount=result.get("booked_usd", 0),
                 data=data
             )
             await live_tracker.track_metric(result.get("metric", {}))
-        
+
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"Revenue invoice paid webhook error: {e}")
@@ -1620,6 +1673,19 @@ async def startup_revenue_tracker():
         # Persist real mainnet observations so performance has history to measure
         snapshot_task = asyncio.create_task(snapshot_poller(SNAPSHOT_INTERVAL))
         logger.info(f"✅ Snapshot poller started ({SNAPSHOT_INTERVAL}s interval)")
+
+        # Restore the truth ledger. Without this the in-memory ledger starts empty
+        # on every boot, so real income booked before the last restart disappears.
+        await ledger_ensure_indexes(db)
+        stored = await ledger_load_all(db)
+        if stored:
+            totals = await ledger_totals(db)
+            logger.info(
+                f"✅ Truth ledger restored: {len(stored)} metric(s), "
+                f"real income ${totals.get('real_income')}"
+            )
+        else:
+            logger.info("✅ Truth ledger empty (no revenue recorded yet)")
 
     except Exception as e:
         logger.error(f"Failed to start systems: {e}")
