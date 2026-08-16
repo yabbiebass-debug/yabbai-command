@@ -60,11 +60,11 @@ export default function Analytics() {
   const load = useCallback(async () => {
     try {
       const [metricsR, txR, missionsR, mintR, settingsR] = await Promise.all([
-        fetch(`${API}/analytics`, { credentials: 'include',  credentials: 'include' }).then(r => r.json()),
-        fetch(`${API}/transactions?limit=100`, { credentials: 'include',  credentials: 'include' }).then(r => r.json()),
-        fetch(`${API}/missions`, { credentials: 'include',  credentials: 'include' }).then(r => r.json()),
-        fetch(`${API}/token-mint`, { credentials: 'include',  credentials: 'include' }).then(r => r.json()),
-        fetch(`${API}/settings`, { credentials: 'include',  credentials: 'include' }).then(r => r.json()),
+        fetch(`${API}/analytics`, { credentials: 'include' }).then(r => r.json()),
+        fetch(`${API}/transactions?limit=100`, { credentials: 'include' }).then(r => r.json()),
+        fetch(`${API}/missions`, { credentials: 'include' }).then(r => r.json()),
+        fetch(`${API}/token-mint`, { credentials: 'include' }).then(r => r.json()),
+        fetch(`${API}/settings`, { credentials: 'include' }).then(r => r.json()),
       ]);
       setMetrics(metricsR);
       setTransactions(Array.isArray(txR) ? txR : []);
@@ -78,7 +78,7 @@ export default function Analytics() {
         // Load treasury balance
         if (settingsR.treasury_wallet) {
           try {
-            const balRes = await fetch(`${API}/solana-balance?owner=${settingsR.treasury_wallet}`, { credentials: 'include',  credentials: 'include' });
+            const balRes = await fetch(`${API}/solana-balance?owner=${settingsR.treasury_wallet}`, { credentials: 'include' });
             const balData = await balRes.json();
             if (balData.ok) {
               setTreasuryBalance(balData.sol || 0);
@@ -91,14 +91,14 @@ export default function Analytics() {
       
       if (mintR.configured) {
         setMintCfg(mintR);
-        const phR = await fetch(`${API}/price-history?mint=${mintR.mint}&limit=200`, { credentials: 'include',  credentials: 'include' });
+        const phR = await fetch(`${API}/price-history?mint=${mintR.mint}&limit=200`, { credentials: 'include' });
         const phData = await phR.json();
         if (phData.ok) setPriceHistory(phData.points.map((p, i) => ({ ts: formatTs(p.ts), price: p.price, i })));
       }
       
       // Load treasury snapshots ONLY for current treasury wallet
       if (settingsR?.treasury_wallet) {
-        const tsR = await fetch(`${API}/treasury-snapshots?limit=200`, { credentials: 'include',  credentials: 'include' });
+        const tsR = await fetch(`${API}/treasury-snapshots?limit=200`, { credentials: 'include' });
         const tsData = await tsR.json();
         if (Array.isArray(tsData)) {
           // Filter to only show snapshots for the CURRENT treasury wallet
@@ -158,7 +158,7 @@ export default function Analytics() {
 
     try {
       // STEP 1: Validate destination is whitelisted
-      const validateResp = await fetch(`${API}/sweep/validate-destination?address=${mainWallet}`, { credentials: 'include',  credentials: 'include' });
+      const validateResp = await fetch(`${API}/sweep/validate-destination?address=${mainWallet}`, { credentials: 'include' });
       const validateData = await validateResp.json();
       
       if (!validateData.authorized) {

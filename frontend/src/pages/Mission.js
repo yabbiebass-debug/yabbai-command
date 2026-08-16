@@ -78,7 +78,7 @@ export default function Mission() {
   const fetchMissions = useCallback(async () => {
     setLoadingMissions(true);
     try {
-      const res = await fetch(`${API}/missions`, { credentials: 'include',  credentials: 'include' });
+      const res = await fetch(`${API}/missions`, { credentials: 'include' });
       const data = await res.json();
       setSavedMissions(Array.isArray(data) ? data : []);
       setDeployCount(Array.isArray(data) ? data.length : 0);
@@ -95,7 +95,7 @@ export default function Mission() {
   // than falling back to a projection.
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API}/performance?window_days=30`, { credentials: 'include',  credentials: 'include' })
+    fetch(`${API}/performance?window_days=30`, { credentials: 'include' })
       .then(r => r.json())
       .then(d => { if (!cancelled) setPerf(d); })
       .catch(() => { if (!cancelled) setPerf({ available: false, reason: 'unreachable' }); });

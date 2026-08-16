@@ -61,7 +61,7 @@ export default function Settings() {
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
-    fetch(`${API}/settings`, { credentials: 'include',  credentials: 'include' })
+    fetch(`${API}/settings`, { credentials: 'include' })
       .then(r => r.json())
       .then(d => { setCfg(prev => ({ ...prev, ...d })); setLoading(false); })
       .catch((e) => {
