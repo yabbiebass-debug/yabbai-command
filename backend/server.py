@@ -14,6 +14,8 @@ from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from revenue.system import RevenueSystem
 from achievements import AchievementTracker
+from solana_live import SolanaLive, jupiter_price as live_jupiter_price
+from performance import treasury_performance
 
 # Load environment BEFORE importing hub_sso (it reads HUB_AUTH_URL at import time)
 ROOT_DIR = Path(__file__).parent
@@ -51,6 +53,10 @@ agent_pool = AgentPool(
 # Background task references
 background_task = None
 agent_pool_task = None
+snapshot_task = None
+
+# How often to persist a real mainnet observation (seconds).
+SNAPSHOT_INTERVAL = int(os.environ.get("SNAPSHOT_INTERVAL_SECONDS", "300"))
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -186,7 +192,9 @@ class EventBody(BaseModel):
 # ── Token Mint CRUD ──────────────────────────────────────────────────────────
 
 @api_router.get("/token-mint")
-async def get_token_mint():
+async def get_token_mint(user: dict = Depends(require_director)):
+    # Returns treasury and main wallet addresses — director only. Holders get the
+    # mint address from /api/public/token instead.
     doc = await db.token_mint_config.find_one({}, {"_id": 0})
     return doc or {"configured": False}
 
@@ -236,7 +244,7 @@ async def save_settings(body: SettingsBody, user: dict = Depends(require_directo
 # ── Missions ───────────────────────────────────────────────────────────────────
 
 @api_router.get("/missions")
-async def list_missions():
+async def list_missions(user: dict = Depends(require_director)):
     docs = await db.missions.find({}, {"_id": 1, "name": 1, "mission_type": 1, "autonomy": 1,
                                        "risk": 1, "status": 1, "created_at": 1, "estimated_apy": 1}).to_list(50)
     return [serialize(d) for d in docs]
@@ -276,7 +284,8 @@ async def delete_mission(mission_id: str, user: dict = Depends(require_director)
 # ── Transactions ─────────────────────────────────────────────────────────────
 
 @api_router.get("/transactions")
-async def list_transactions(limit: int = Query(50, le=200)):
+async def list_transactions(limit: int = Query(50, le=200),
+                            user: dict = Depends(require_director)):
     docs = await db.transactions.find({}).sort("created_at", -1).to_list(limit)
     return [serialize(d) for d in docs]
 
@@ -292,7 +301,8 @@ async def record_transaction(body: TransactionBody, user: dict = Depends(require
 # ── Price history ────────────────────────────────────────────────────────────
 
 @api_router.get("/price-history")
-async def get_price_history(mint: str, limit: int = Query(100, le=500)):
+async def get_price_history(mint: str, limit: int = Query(100, le=500),
+                            user: dict = Depends(require_director)):
     if not is_valid_base58(mint):
         return {"ok": False, "points": []}
     docs = await db.price_history.find({"mint": mint}).sort("ts", 1).to_list(limit)
@@ -316,7 +326,8 @@ async def add_price_snapshot(body: PriceSnapshotBody, user: dict = Depends(requi
 # ── Treasury snapshots ──────────────────────────────────────────────────────────
 
 @api_router.get("/treasury-snapshots")
-async def get_treasury_snapshots(limit: int = Query(100, le=500)):
+async def get_treasury_snapshots(limit: int = Query(100, le=500),
+                                 user: dict = Depends(require_director)):
     docs = await db.treasury_snapshots.find({}).sort("ts", 1).to_list(limit)
     return [{"balance_sol": d["balance_sol"], "balance_usd": d.get("balance_usd"), "address": d.get("address"), "ts": d["ts"].isoformat() if isinstance(d["ts"], datetime) else d["ts"]} for d in docs]
 
@@ -334,7 +345,8 @@ async def add_treasury_snapshot(body: TreasurySnapshotBody, user: dict = Depends
 # ── Events log ───────────────────────────────────────────────────────────────────
 
 @api_router.get("/events")
-async def get_events(limit: int = Query(40, le=200)):
+async def get_events(limit: int = Query(40, le=200),
+                     user: dict = Depends(require_director)):
     docs = await db.events.find({}).sort("ts", -1).to_list(limit)
     return [{"id": str(d["_id"]), "text": d["text"], "color": d.get("color", ""), "category": d.get("category", "system"), "ts": d["ts"].isoformat() if isinstance(d["ts"], datetime) else d["ts"]} for d in docs]
 
@@ -423,7 +435,7 @@ async def get_solana_balance(request: Request, owner: str):
 # ── Analytics aggregate ────────────────────────────────────────────────────────────
 
 @api_router.get("/analytics")
-async def get_analytics():
+async def get_analytics(user: dict = Depends(require_director)):
     """Aggregate key metrics for analytics dashboard"""
     tx_count = await db.transactions.count_documents({})
     mission_count = await db.missions.count_documents({})
@@ -457,6 +469,304 @@ async def get_analytics():
         "latest_price": latest_price,
         "latest_treasury_sol": latest_treasury,
     }
+
+# ── Live mainnet token stats ───────────────────────────────────────────────────
+
+def _rpc_host(url: str) -> str:
+    """Host only. RPC provider URLs embed the API key in the path or query, so the
+    full string must never reach a response body, a log line, or the client."""
+    try:
+        return url.split("://", 1)[1].split("/", 1)[0].split("?", 1)[0]
+    except (IndexError, AttributeError):
+        return "unknown"
+
+
+async def _configured_mint() -> Optional[str]:
+    doc = await db.token_mint_config.find_one({})
+    mint = (doc or {}).get("mint")
+    return mint if mint and is_valid_base58(mint) else None
+
+
+async def _configured_treasury() -> str:
+    doc = await db.settings.find_one({})
+    return (doc or {}).get("treasury_wallet") or TREASURY_WALLET
+
+
+@api_router.get("/token-stats")
+@limiter.limit("30/minute")
+async def get_token_stats(request: Request, user: dict = Depends(require_director)):
+    """Live mainnet facts about the configured token — director view.
+
+    The anonymous equivalent is /api/public/token, which returns a narrower
+    whitelisted payload. This one may carry operational detail, so it is gated.
+
+    Every field is read from chain or from Jupiter. Anything unavailable comes back
+    as null with a matching entry in `data_gaps` — never as 0 and never estimated.
+    """
+    mint = await _configured_mint()
+    if not mint:
+        return {
+            "ok": False,
+            "configured": False,
+            "detail": "No token mint configured. Set one in Settings.",
+        }
+
+    chain = SolanaLive(SOLANA_RPC)
+    treasury_addr = await _configured_treasury()
+
+    supply, authorities, largest, holders, price, treasury = await asyncio.gather(
+        chain.token_supply(mint),
+        chain.mint_authorities(mint),
+        chain.largest_accounts(mint),
+        chain.holder_count(mint),
+        live_jupiter_price(mint, os.environ.get("JUPITER_API_KEY", "")),
+        chain.treasury_state(treasury_addr, mint),
+    )
+
+    data_gaps: List[str] = []
+    if supply is None:
+        data_gaps.append("supply")
+    if authorities is None:
+        data_gaps.append("mint_authorities")
+    if largest is None:
+        data_gaps.append("largest_accounts")
+    if holders is None:
+        data_gaps.append("holder_count")
+    if price is None:
+        data_gaps.append("price")
+    if treasury.get("sol") is None:
+        data_gaps.append("treasury_sol")
+
+    market_cap = None
+    if supply and price is not None and supply.get("supply") is not None:
+        market_cap = supply["supply"] * price
+
+    # Share of supply held by the top accounts the RPC returned. A real, checkable
+    # concentration measure — high values mean a few wallets can move the price.
+    top_concentration_pct = None
+    if largest and supply and supply.get("supply"):
+        top_sum = sum(a["amount"] for a in largest if a.get("amount"))
+        if supply["supply"] > 0:
+            top_concentration_pct = round(top_sum / supply["supply"] * 100, 4)
+
+    treasury_value_usd = None
+    if price is not None and treasury.get("token_balance") is not None:
+        treasury_value_usd = treasury["token_balance"] * price
+
+    return {
+        "ok": True,
+        "configured": True,
+        "mint": mint,
+        "network": "mainnet-beta",
+        # Never return SOLANA_RPC. Provider URLs carry the API key in the path or
+        # query string, so echoing it here published the credential on an
+        # unauthenticated endpoint. Expose only the host, which is not a secret.
+        "rpc_host": _rpc_host(SOLANA_RPC),
+        "supply": supply,
+        "authorities": authorities,
+        "holders": holders,
+        "price_usd": price,
+        "market_cap_usd": market_cap,
+        "top_accounts": largest,
+        "top_concentration_pct": top_concentration_pct,
+        "treasury": treasury,
+        "treasury_token_value_usd": treasury_value_usd,
+        "data_gaps": data_gaps,
+        "fetched_at": utcnow(),
+    }
+
+
+# ── Public (holders) surface ───────────────────────────────────────────────────
+#
+# Everything below is deliberately unauthenticated and is the ONLY unauthenticated
+# data in the app. Two rules govern it:
+#
+#   1. Nothing here is secret. Every field is already readable by anyone with an
+#      RPC endpoint and the mint address, so publishing it discloses nothing new.
+#      Supply, price, holder count and authority status are public chain facts.
+#   2. Payloads are built field by field. Never spread a Mongo document or an
+#      internal dict into a public response — that is how a field added later
+#      leaks without anyone noticing. If a new field belongs here, add it here
+#      explicitly.
+#
+# Operational state — settings, transactions, sweeps, revenue, agents, health —
+# is NOT public and must stay behind require_director.
+
+@api_router.get("/public/token")
+@limiter.limit("60/minute")
+async def public_token(request: Request):
+    """On-chain facts about the token. Safe for anonymous holders."""
+    mint = await _configured_mint()
+    if not mint:
+        return {"ok": False, "configured": False}
+
+    chain = SolanaLive(SOLANA_RPC)
+    treasury_addr = await _configured_treasury()
+
+    supply, authorities, largest, holders, price, treasury = await asyncio.gather(
+        chain.token_supply(mint),
+        chain.mint_authorities(mint),
+        chain.largest_accounts(mint),
+        chain.holder_count(mint),
+        live_jupiter_price(mint, os.environ.get("JUPITER_API_KEY", "")),
+        chain.treasury_state(treasury_addr, mint),
+    )
+
+    data_gaps: List[str] = []
+    if supply is None:
+        data_gaps.append("supply")
+    if holders is None:
+        data_gaps.append("holder_count")
+    if largest is None:
+        data_gaps.append("concentration")
+    if price is None:
+        data_gaps.append("price")
+    if authorities is None:
+        data_gaps.append("authorities")
+    if treasury.get("sol") is None:
+        data_gaps.append("treasury_sol")
+    # holdings is None when the read failed; an empty list means genuinely no tokens.
+    # Those are different facts and must not both render as a blank.
+    if treasury.get("holdings") is None:
+        data_gaps.append("treasury_token_balance")
+
+    market_cap = None
+    if supply and price is not None and supply.get("supply") is not None:
+        market_cap = supply["supply"] * price
+
+    concentration = None
+    if largest and supply and supply.get("supply"):
+        top_sum = sum(a["amount"] for a in largest if a.get("amount"))
+        if supply["supply"] > 0:
+            concentration = round(top_sum / supply["supply"] * 100, 4)
+
+    return {
+        "ok": True,
+        "configured": True,
+        "mint": mint,
+        "network": "mainnet-beta",
+        "supply": (supply or {}).get("supply"),
+        "decimals": (supply or {}).get("decimals"),
+        "price_usd": price,
+        "market_cap_usd": market_cap,
+        "holders": (holders or {}).get("holders"),
+        "top_concentration_pct": concentration,
+        # Verifiable trust signals — holders can check both against any explorer.
+        "mint_authority_revoked": (authorities or {}).get("mint_revoked"),
+        "freeze_authority_revoked": (authorities or {}).get("freeze_revoked"),
+        # The treasury address is public by definition; publishing its balance is
+        # the point of a transparent treasury.
+        "treasury_address": treasury_addr,
+        "treasury_sol": treasury.get("sol"),
+        "treasury_token_balance": treasury.get("token_balance"),
+        "data_gaps": data_gaps,
+        "fetched_at": utcnow(),
+    }
+
+
+@api_router.get("/public/price-history")
+@limiter.limit("60/minute")
+async def public_price_history(request: Request, limit: int = Query(100, le=500)):
+    """Recorded price series for the configured mint. Price is a public fact."""
+    mint = await _configured_mint()
+    if not mint:
+        return {"ok": False, "configured": False, "points": []}
+    docs = await db.price_history.find({"mint": mint}).sort("ts", 1).to_list(limit)
+    return {
+        "ok": True,
+        "mint": mint,
+        "points": [
+            {
+                "price": d["price"],
+                "ts": d["ts"].isoformat() if isinstance(d["ts"], datetime) else d["ts"],
+            }
+            for d in docs
+        ],
+    }
+
+
+@api_router.get("/performance")
+async def get_performance(window_days: int = Query(30, ge=1, le=365),
+                          user: dict = Depends(require_director)):
+    """Realised treasury performance measured from recorded snapshots.
+
+    Returns `available: false` with a reason when there is not enough history. It
+    never projects, and it never substitutes a formula for a measurement.
+    """
+    return await treasury_performance(db, window_days=window_days)
+
+
+async def record_live_snapshot() -> Dict[str, Any]:
+    """Read mainnet once and persist a real price + treasury observation.
+
+    These rows are what /api/performance later measures, so nothing is written
+    unless the read actually succeeded.
+    """
+    mint = await _configured_mint()
+    treasury_addr = await _configured_treasury()
+    chain = SolanaLive(SOLANA_RPC)
+    written = {"price": False, "treasury": False}
+    now = datetime.now(timezone.utc)
+
+    # Field names, timestamp type and retention deliberately match the manual
+    # /api/price-snapshot and /api/treasury-snapshot writers, so both producers
+    # populate one consistent collection.
+    if mint:
+        price = await live_jupiter_price(mint, os.environ.get("JUPITER_API_KEY", ""))
+        if price is not None:
+            await db.price_history.insert_one(
+                {"mint": mint, "price": price, "ts": now, "source": "jupiter:v3"}
+            )
+            await _prune_collection(db.price_history, {"mint": mint})
+            written["price"] = True
+
+    sol = await chain.sol_balance(treasury_addr)
+    if sol is not None:
+        price_for_usd = PRICE_CACHE.get(mint, {}).get("price") if mint else None
+        await db.treasury_snapshots.insert_one(
+            {
+                "address": treasury_addr,
+                "balance_sol": sol,
+                "balance_usd": sol * price_for_usd if price_for_usd else None,
+                "ts": now,
+                "source": "rpc:getBalance",
+            }
+        )
+        await _prune_collection(db.treasury_snapshots, {})
+        written["treasury"] = True
+
+    return written
+
+
+async def _prune_collection(collection, query: Dict[str, Any], keep: int = 500):
+    """Keep the newest `keep` rows, matching the retention the manual writers use."""
+    count = await collection.count_documents(query)
+    if count <= keep:
+        return
+    oldest = await collection.find(query).sort("ts", 1).limit(count - keep).to_list(count - keep)
+    if oldest:
+        await collection.delete_many({"_id": {"$in": [d["_id"] for d in oldest]}})
+
+
+@api_router.post("/snapshot/now")
+async def snapshot_now(user: dict = Depends(require_director)):
+    """Force an immediate live observation instead of waiting for the poller."""
+    return {"ok": True, "written": await record_live_snapshot(), "at": utcnow()}
+
+
+async def snapshot_poller(interval_seconds: int = 300):
+    """Persist a real observation every interval so performance has history to measure."""
+    while True:
+        try:
+            written = await record_live_snapshot()
+            if any(written.values()):
+                logger.info(f"📈 Snapshot recorded: {written}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Snapshot poller error: {e}")
+        await asyncio.sleep(interval_seconds)
+
 
 # ── Sweep / Withdrawal Endpoints ────────────────────────────────────────────────
 
@@ -537,8 +847,9 @@ async def revenue_dashboard(user: dict = Depends(require_director)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/revenue/status")
-async def revenue_status():
-    """Get revenue system status (public)."""
+async def revenue_status(user: dict = Depends(require_director)):
+    """Get revenue system status. Was marked public; it exposes income and gate
+    state, which is operational, so it is now director-only."""
     try:
         return {
             "real_income": revenue_system.ledger.real_income(),
@@ -748,7 +1059,7 @@ async def revenue_webhook_sweep_attempted(request: Request):
 # ── Live Tracking Endpoints ────────────────────────────────────────────────
 
 @api_router.get("/revenue/live/status")
-async def revenue_live_status():
+async def revenue_live_status(user: dict = Depends(require_director)):
     """Get live tracking status."""
     try:
         status = await live_tracker.get_live_status()
@@ -758,7 +1069,7 @@ async def revenue_live_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/revenue/live/dashboard")
-async def revenue_live_dashboard():
+async def revenue_live_dashboard(user: dict = Depends(require_director)):
     """Get complete live dashboard with real-time data."""
     try:
         dashboard = await live_tracker.get_live_dashboard()
@@ -768,7 +1079,8 @@ async def revenue_live_dashboard():
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/revenue/live/metrics")
-async def revenue_live_metrics(limit: int = 50):
+async def revenue_live_metrics(limit: int = 50,
+                               user: dict = Depends(require_director)):
     """Get live metrics stream."""
     try:
         metrics = await live_tracker.get_live_metrics(limit)
@@ -778,7 +1090,8 @@ async def revenue_live_metrics(limit: int = 50):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/revenue/live/income")
-async def revenue_live_income(limit: int = 100):
+async def revenue_live_income(limit: int = 100,
+                              user: dict = Depends(require_director)):
     """Get live income stream."""
     try:
         income = await live_tracker.get_live_income_stream(limit)
@@ -857,7 +1170,7 @@ async def revenue_live_websocket(websocket: WebSocket):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @api_router.get("/agents/status")
-async def agents_status():
+async def agents_status(user: dict = Depends(require_director)):
     """Get multi-agent pool status."""
     try:
         status = agent_pool.get_status()
@@ -941,7 +1254,8 @@ async def agents_phase_status(phase: str):
 @api_router.get("/achievements")
 async def get_achievements(
     limit: int = Query(50, le=200),
-    category: Optional[str] = Query(None)
+    category: Optional[str] = Query(None),
+    user: dict = Depends(require_director)
 ):
     """Get recent achievements from background loops and agents."""
     try:
@@ -1124,8 +1438,11 @@ async def check_agent_pool_health() -> dict:
 
 @api_router.get("/health/details")
 @limiter.limit("30/minute")
-async def health_details(request: Request):
-    """Return detailed health metrics for all backend integrations."""
+async def health_details(request: Request, user: dict = Depends(require_director)):
+    """Return detailed health metrics for all backend integrations.
+
+    Gated: it names upstream providers and their latencies, which is infrastructure
+    reconnaissance rather than anything a holder needs."""
     health_status = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "services": []
@@ -1159,18 +1476,42 @@ async def root():
 
 app.include_router(api_router)
 
+# CORS. allow_credentials=True means the session cookie can ride on cross-origin
+# requests, so the origin list must never be '*' in production — a wildcard with
+# credentials lets any site on the internet make authenticated calls on behalf of a
+# logged-in Director. Default to the known hosts rather than to '*'.
+_DEFAULT_ORIGINS = ",".join([
+    "https://yabbai.network",
+    "https://command.yabbai.network",
+    "https://token.yabbai.network",
+    "https://holders.yabbai.network",
+])
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get("CORS_ORIGINS", _DEFAULT_ORIGINS).split(",")
+    if o.strip()
+]
+if "*" in _cors_origins:
+    logger.error(
+        "CORS_ORIGINS contains '*' while credentials are allowed. Refusing the "
+        "wildcard and falling back to the known-host list."
+    )
+    _cors_origins = _DEFAULT_ORIGINS.split(",")
+
+logger.info(f"CORS origins: {_cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 @app.on_event("startup")
 async def startup_revenue_tracker():
     """Start the live revenue tracking and agent pool on startup."""
-    global background_task, agent_pool_task
+    global background_task, agent_pool_task, snapshot_task
     try:
         # Start background orchestrator
         background_task = asyncio.create_task(live_tracker.start_background_orchestrator())
@@ -1180,13 +1521,17 @@ async def startup_revenue_tracker():
         agent_pool_task = asyncio.create_task(agent_pool.start())
         logger.info("✅ Multi-Agent Pool started")
 
+        # Persist real mainnet observations so performance has history to measure
+        snapshot_task = asyncio.create_task(snapshot_poller(SNAPSHOT_INTERVAL))
+        logger.info(f"✅ Snapshot poller started ({SNAPSHOT_INTERVAL}s interval)")
+
     except Exception as e:
         logger.error(f"Failed to start systems: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
     """Shutdown database and stop all systems."""
-    global background_task, agent_pool_task
+    global background_task, agent_pool_task, snapshot_task
     try:
         await live_tracker.stop_background_orchestrator()
         if background_task:
@@ -1197,6 +1542,10 @@ async def shutdown_db_client():
         if agent_pool_task:
             agent_pool_task.cancel()
         logger.info("⏸️  Multi-Agent Pool stopped")
+
+        if snapshot_task:
+            snapshot_task.cancel()
+        logger.info("⏸️  Snapshot poller stopped")
 
     except Exception as e:
         logger.error(f"Error stopping systems: {e}")

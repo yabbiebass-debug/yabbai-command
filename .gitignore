@@ -80,10 +80,23 @@ memory/test_credentials.md
 
 # Mobile development
 android-sdk/-e 
+# Build output. Render and Netlify build from source, so compiled bundles never
+# belong in the repo — and a stale committed bundle is worse than none, since it
+# can be served in place of a fresh build.
+frontend/dist-command/
+frontend/dist-holders/
+frontend/build_tmp_*/
+frontend/build_old_*/
+frontend/build_stale_*/
+frontend/build_holders_serving/
+
 # Environment and credential files
 .env
 .env.*
 *.env
+# Templates carry no secrets and document required config — keep them tracked.
+!.env.example
+!**/.env.example
 credentials.json
 *.pem
 *.key

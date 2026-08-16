@@ -63,7 +63,35 @@
   "scripts": {
     "start": "craco start",
     "build": "craco build",
+    "build:holders": "cross-env REACT_APP_BUILD_TARGET=holders craco build",
+    "start:holders": "cross-env REACT_APP_BUILD_TARGET=holders craco start",
     "test": "craco test"
+  },
+  "//proxy": "Dev server only. ProtectedRoute calls fetch('/api/auth/me') on a relative path, so without this the request hits the CRA server, 404s, and the UI redirects to the hub before anything renders.",
+  "proxy": "http://127.0.0.1:8000",
+  "//eslint": "eslint must stay on 8.x. react-scripts 5.0.1 depends on eslint ^8.3.0 and eslint-webpack-plugin@3 peers ^7||^8. On eslint 9 the build fails with 'Cannot set properties of undefined (setting defaultMeta)'.",
+  "//overrides": "react-scripts 5.0.1 mixes two incompatible ajv generations. schema-utils@4 + ajv-keywords@5 need ajv@8 ('Cannot find module ajv/dist/compile/codegen' without it). Three packages instead bundle ajv-keywords@3, which reads ajv@6 internals and dies with 'Cannot read properties of undefined (reading date)' under ajv@8. So: ajv@8 globally, ajv@6 nested into exactly those three subtrees.",
+  "overrides": {
+    "ajv": "^8.17.1",
+    "fork-ts-checker-webpack-plugin": {
+      "ajv": "^6.12.6"
+    },
+    "babel-loader": {
+      "ajv": "^6.12.6"
+    },
+    "file-loader": {
+      "ajv": "^6.12.6"
+    },
+    "eslint": {
+      "ajv": "^6.12.6"
+    }
+  },
+  "resolutions": {
+    "ajv": "^8.17.1",
+    "fork-ts-checker-webpack-plugin/ajv": "^6.12.6",
+    "babel-loader/ajv": "^6.12.6",
+    "file-loader/ajv": "^6.12.6",
+    "eslint/ajv": "^6.12.6"
   },
   "browserslist": {
     "production": [
@@ -80,10 +108,11 @@
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
     "@craco/craco": "^7.1.0",
+    "cross-env": "^7.0.3",
     "@emergentbase/visual-edits": "https://assets.emergent.sh/npm/emergentbase-visual-edits-1.0.8.tgz",
-    "@eslint/js": "9.23.0",
+    "@eslint/js": "^8.57.1",
     "autoprefixer": "^10.4.20",
-    "eslint": "9.23.0",
+    "eslint": "^8.57.1",
     "eslint-plugin-import": "2.31.0",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react": "7.37.4",

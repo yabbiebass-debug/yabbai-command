@@ -131,9 +131,12 @@ class AgentPool:
                 })
 
                 # Respawn if needed
-                if len(self.phase_agents[agent.current_phase]) <= self.min_agents_per_phase:
-                    logger.warning(f"⚠️  Phase {agent.current_phase.value} below minimum, respawning...")
-                    await self.spawn_agent(agent.current_phase)
+                self.phase_agents[agent.home_phase].discard(agent.agent_id)
+                self.agents.pop(agent.agent_id, None)
+
+                if len(self.phase_agents[agent.home_phase]) < self.min_agents_per_phase:
+                    logger.warning(f"⚠️  Phase {agent.home_phase.value} below minimum, respawning...")
+                    await self.spawn_agent(agent.home_phase)
 
                 break
 
@@ -149,7 +152,7 @@ class AgentPool:
             agent.task.cancel()
 
         # Remove from tracking
-        self.phase_agents[agent.current_phase].discard(agent_id)
+        self.phase_agents[agent.home_phase].discard(agent_id)
         del self.agents[agent_id]
 
         logger.info(f"🔴 Terminated {agent_id}")
@@ -216,6 +219,7 @@ class AgentPool:
         """Supervise all agents and log status."""
         while self.running:
             try:
+                now = datetime.now(timezone.utc)
                 # Collect stats
                 total_agents = len(self.agents)
                 total_cycles = sum(a.cycles_completed for a in self.agents.values())

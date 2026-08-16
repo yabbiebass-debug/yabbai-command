@@ -9,14 +9,32 @@ const TEMPLATES = [
   { id: 't5', name: 'Mission Report', aspect: '1200x800', type: 'report' },
 ];
 
+// Copy shipped here must not assert yields, holder counts, or earnings — those are
+// public investment claims and nothing in this codebase measures them. Removed:
+// "847% APY — AI-powered treasury management" and "Join 1,337 holders earning
+// passive income"; both numbers were invented and neither was ever computed.
 const COPY_LINES = [
-  'YABBAI — Autonomous Yield on Solana',
-  '⚡ Mission active. Yields accumulating.',
-  'Join 1,337 holders earning passive income',
-  '847% APY — AI-powered treasury management',
+  'YABBAI — Autonomous Treasury on Solana',
   'BASHAM: The business wealth protocol',
   'From Side Hustle to Autonomous Income Machine',
 ];
+
+// Mirrors backend/revenue/gates/compliance_gate.py BANNED_CLAIM_PATTERNS. Promo art is
+// generated and exported entirely client-side, so it never reaches the backend gate —
+// without this check the gate is unenforced on the one surface that faces the public.
+const BANNED_CLAIM_PATTERNS = [
+  [/guaranteed (returns?|profit|income|results?)/i, 'Guaranteed-returns claim'],
+  [/(make|earn) \$?\d+.{0,15}(per|a|each) (day|week|month)/i, 'Income/earnings claim'],
+  [/risk[- ]?free/i, "'Risk-free' claim"],
+  [/limited spots|only \d+ left|act now|expires (today|soon)/i, 'Fake scarcity'],
+  [/\d[\d,.]* ?% ?(apy|apr|returns?|gains?)/i, 'Unsubstantiated yield claim'],
+  [/\d[\d,.]* (holders|investors|members|customers|users)/i, 'Unverified count claim'],
+  [/as seen (on|in)/i, "'As seen on' claim"],
+];
+
+function checkClaims(text) {
+  return BANNED_CLAIM_PATTERNS.filter(([re]) => re.test(text || '')).map(([, label]) => label);
+}
 
 const PromoCanvas = React.forwardRef(({ template, headline, subline, theme, animating }, canvasRef) => {
   const frameRef = useRef(0);
@@ -97,7 +115,7 @@ const PromoCanvas = React.forwardRef(({ template, headline, subline, theme, anim
 });
 
 export default function Promo() {
-  const { success, info } = useToast();
+  const { success, info, error } = useToast();
   const [selectedTemplate, setSelectedTemplate] = useState(TEMPLATES[0]);
   const [headline, setHeadline] = useState('YABBAI');
   const [subline, setSubline] = useState(COPY_LINES[0]);
@@ -107,13 +125,23 @@ export default function Promo() {
   const [generated, setGenerated] = useState([]);
   const canvasRef = useRef(null);
 
+  const claimIssues = checkClaims(`${headline} ${subline}`);
+
   const handleGenerate = () => {
+    if (claimIssues.length) {
+      error(`Blocked — ${claimIssues.join('; ')}. Rewrite before publishing.`);
+      return;
+    }
     const entry = { id: Date.now(), template: selectedTemplate.name, headline, subline, theme, ts: new Date().toLocaleTimeString() };
     setGenerated(prev => [entry, ...prev].slice(0, 8));
     success(`Promo generated: ${selectedTemplate.name}`);
   };
 
   const handleExportPng = () => {
+    if (claimIssues.length) {
+      error(`Export blocked — ${claimIssues.join('; ')}. Rewrite before publishing.`);
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) { info('Canvas not ready'); return; }
     // Render at full resolution
