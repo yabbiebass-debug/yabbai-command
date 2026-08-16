@@ -13,12 +13,12 @@ export default function Payment() {
     const loadRealData = async () => {
       try {
         // Get real income from revenue system
-        const statusRes = await fetch(`${API}/revenue/status`);
+        const statusRes = await fetch(`${API}/revenue/status`, { credentials: 'include',  credentials: 'include' });
         const statusData = await statusRes.json();
         setRealIncome(statusData.real_income || 0);
 
         // Get real transactions
-        const incomeRes = await fetch(`${API}/revenue/live/income?limit=100`);
+        const incomeRes = await fetch(`${API}/revenue/live/income?limit=100`, { credentials: 'include',  credentials: 'include' });
         const incomeData = await incomeRes.json();
         
         if (incomeData.income) {

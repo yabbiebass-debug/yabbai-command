@@ -80,7 +80,7 @@ export default function YabbaiApp() {
 
   // Load token mint config
   useEffect(() => {
-    fetch(`${API}/token-mint`)
+    fetch(`${API}/token-mint`, { credentials: 'include',  credentials: 'include' })
       .then(r => {
         if (r.status === 429) {
           toastError('Rate limited - try again shortly');
@@ -106,7 +106,7 @@ export default function YabbaiApp() {
     if (!mintRef.current) return;
     
     const loadPriceHistory = () => {
-      fetch(`${API}/price-history?mint=${mintRef.current}&limit=60`)
+      fetch(`${API}/price-history?mint=${mintRef.current}&limit=60`, { credentials: 'include',  credentials: 'include' })
         .then(r => {
           if (r.status === 429) {
             toastError('Price history rate limited - retrying shortly');
@@ -134,7 +134,7 @@ export default function YabbaiApp() {
   useEffect(() => {
     if (!mintRef.current) return;
     const poll = () => {
-      fetch(`${API}/jupiter-price?mint=${mintRef.current}`)
+      fetch(`${API}/jupiter-price?mint=${mintRef.current}`, { credentials: 'include',  credentials: 'include' })
         .then(r => {
           if (r.status === 429) {
             toastError('Price API rate limited - retrying shortly');
@@ -155,7 +155,7 @@ export default function YabbaiApp() {
   useEffect(() => {
     if (!mintCfg?.configured) return;
     const load = () => {
-      fetch(`${API}/token-stats`)
+      fetch(`${API}/token-stats`, { credentials: 'include',  credentials: 'include' })
         .then(r => r.json())
         .then(d => { if (d.ok) setStats(d); })
         .catch(e => console.error('token-stats fetch failed:', e));
@@ -200,12 +200,18 @@ export default function YabbaiApp() {
         >
           <div style={{ fontSize: 20, lineHeight: 1 }}>⚠️</div>
           <div style={{ flex: 1 }}>
+            {/* This never meant the data was simulated. It fires whenever the token
+                config could not be read, which is usually a failed auth call rather
+                than a missing mint. Saying "simulated" when the real cause is a 401
+                is the same class of dishonesty as the projected-APY numbers. */}
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: '#F5A623', marginBottom: 4 }}>
-              SIMULATION MODE
+              TOKEN CONFIG UNAVAILABLE
             </div>
             <div style={{ fontSize: 13, color: '#e8f0ff', lineHeight: 1.5 }}>
-              This token data is simulated for demonstration.
-              Configure a real SPL token in Settings to show live market data.
+              The token configuration could not be read, so market data is not shown.
+              No values on this page are simulated — they are simply absent.
+              This usually means the session is not authenticated; sign in at the hub,
+              or set the mint in Settings if none is configured.
             </div>
           </div>
         </div>
