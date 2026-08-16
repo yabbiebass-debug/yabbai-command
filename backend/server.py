@@ -701,6 +701,68 @@ async def public_price_history(request: Request, limit: int = Query(100, le=500)
     }
 
 
+@api_router.get("/ai/status")
+async def ai_status(user: dict = Depends(require_director)):
+    """Whether the hub AI gateway is reachable from this service."""
+    from hub_ai import available
+    return await available()
+
+
+@api_router.post("/ai/ask")
+@limiter.limit("20/minute")
+async def ai_ask(request: Request, user: dict = Depends(require_director)):
+    """Ask the hub's provider chain a question, grounded in system knowledge.
+
+    The grounding is what keeps generated text from reinventing the fictions this
+    project removed. Output is checked against the same rules before it is
+    returned, and violations are reported rather than silently passed on.
+    """
+    from hub_ai import chat, HubAIError, HubAIUnavailable
+    from knowledge import system_prompt, check_output
+
+    data = await request.json()
+    question = (data.get("question") or "").strip()
+    if not question:
+        raise HTTPException(400, "question is required")
+
+    # Anchor the model to current chain state so it cannot invent figures.
+    live: Dict[str, Any] = {}
+    try:
+        mint = await _configured_mint()
+        if mint:
+            chain = SolanaLive(SOLANA_RPC)
+            supply, price = await asyncio.gather(
+                chain.token_supply(mint),
+                live_jupiter_price(mint, os.environ.get("JUPITER_API_KEY", "")),
+            )
+            live = {
+                "price_usd": price,
+                "market_cap_usd": (supply["supply"] * price)
+                if supply and price is not None else None,
+            }
+    except Exception as e:
+        logger.warning(f"ai_ask could not load live stats: {e}")
+
+    try:
+        answer = await chat([
+            {"role": "system", "content": system_prompt(live)},
+            {"role": "user", "content": question},
+        ])
+    except HubAIUnavailable as e:
+        raise HTTPException(503, f"AI gateway not configured: {e}")
+    except HubAIError as e:
+        raise HTTPException(502, f"AI gateway error: {e}")
+
+    issues = check_output(answer)
+    return {
+        "ok": True,
+        "answer": answer,
+        # Surfaced, not suppressed: a grounding violation is worth seeing.
+        "grounding_issues": issues,
+        "grounded_on": list(live.keys()),
+    }
+
+
 @api_router.get("/performance")
 async def get_performance(window_days: int = Query(30, ge=1, le=365),
                           user: dict = Depends(require_director)):
