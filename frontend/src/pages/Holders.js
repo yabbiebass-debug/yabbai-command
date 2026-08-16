@@ -302,6 +302,57 @@ export default function Holders() {
               </section>
             )}
 
+            {/* Traded activity from DexScreener. Fields that a bonding curve has
+                no equivalent for stay as DATA GAP — showing $0 liquidity would
+                claim something false about the token. */}
+            {stats.market && (
+              <section style={{
+                padding: 20, borderRadius: 10, background: 'rgba(10,17,40,0.7)',
+                border: '1px solid rgba(58,80,112,0.25)', marginBottom: 18,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: 1, color: '#3a5070' }}>
+                    MARKET ACTIVITY — 24H
+                  </span>
+                  {stats.market.pair_url && (
+                    <a href={stats.market.pair_url} target="_blank" rel="noopener noreferrer"
+                       style={{ fontSize: 11, color: '#9945FF', textDecoration: 'none' }}>
+                      live chart ↗
+                    </a>
+                  )}
+                </div>
+                <div style={{
+                  display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 20,
+                }}>
+                  <Stat
+                    label="VOLUME 24H"
+                    value={stats.market.volume_24h_usd == null ? GAP : usd(stats.market.volume_24h_usd)}
+                  />
+                  <Stat
+                    label="TRADES 24H"
+                    value={stats.market.trades_24h == null
+                      ? GAP
+                      : `${stats.market.trades_24h} (${stats.market.buys_24h}B / ${stats.market.sells_24h}S)`}
+                  />
+                  <Stat
+                    label="LIQUIDITY"
+                    value={stats.market.liquidity_usd == null ? GAP : usd(stats.market.liquidity_usd)}
+                  />
+                  <Stat
+                    label="VENUE"
+                    value={stats.market.dex || GAP}
+                  />
+                </div>
+                {stats.market.liquidity_usd == null && (
+                  <p style={{ color: '#8fa3bf', fontSize: 12, marginTop: 12, lineHeight: 1.6 }}>
+                    Liquidity and 24h price change read DATA GAP because the token is
+                    still on its launch bonding curve, which has no conventional
+                    liquidity pool to measure. Both begin reporting once it graduates.
+                  </p>
+                )}
+              </section>
+            )}
+
             {/* Trust signals */}
             <section style={{
               padding: 20, borderRadius: 10, background: 'rgba(10,17,40,0.7)',
