@@ -283,6 +283,25 @@ export default function Holders() {
               />
             </section>
 
+            {/* While the token is still on its bonding curve the curve itself holds
+                the supply, so holder count reads 1 and concentration reads ~100%.
+                Those are accurate but alarming without context, and they resolve on
+                their own at graduation. Shown only while the condition holds. */}
+            {stats.top_concentration_pct != null && stats.top_concentration_pct > 90 && (
+              <section style={{
+                padding: 14, borderRadius: 8, background: 'rgba(153,69,255,0.07)',
+                border: '1px solid rgba(153,69,255,0.25)', fontSize: 12,
+                color: '#c9b8ff', lineHeight: 1.6, marginBottom: 18,
+              }}>
+                <strong>Why holder count is low and concentration is high right now.</strong>{' '}
+                This token is still on its launch bonding curve, which holds the supply
+                until it graduates to a liquidity pool. Until then the curve counts as a
+                single holder, so concentration reads near 100%. It is a property of the
+                launch mechanism, not of distribution, and it resolves at graduation.
+                Both figures are read from chain and will move on their own.
+              </section>
+            )}
+
             {/* Trust signals */}
             <section style={{
               padding: 20, borderRadius: 10, background: 'rgba(10,17,40,0.7)',
