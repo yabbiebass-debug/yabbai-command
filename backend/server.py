@@ -16,6 +16,7 @@ from revenue.system import RevenueSystem
 from achievements import AchievementTracker
 from solana_live import SolanaLive, jupiter_price as live_jupiter_price
 from performance import treasury_performance
+from dexscreener import market as dex_market, gaps as dex_gaps
 
 # Load environment BEFORE importing hub_sso (it reads HUB_AUTH_URL at import time)
 ROOT_DIR = Path(__file__).parent
@@ -630,13 +631,14 @@ async def public_token(request: Request):
     chain = SolanaLive(SOLANA_RPC, fallbacks=SOLANA_FALLBACKS)
     treasury_addr = await _configured_treasury()
 
-    supply, authorities, largest, holders, price, treasury = await asyncio.gather(
+    supply, authorities, largest, holders, price, treasury, mkt = await asyncio.gather(
         chain.token_supply(mint),
         chain.mint_authorities(mint),
         chain.largest_accounts(mint),
         chain.holder_count(mint),
         live_jupiter_price(mint, os.environ.get("JUPITER_API_KEY", "")),
         chain.treasury_state(treasury_addr, mint),
+        dex_market(mint),
     )
 
     data_gaps: List[str] = []
@@ -650,6 +652,7 @@ async def public_token(request: Request):
         data_gaps.append("price")
     if authorities is None:
         data_gaps.append("authorities")
+    data_gaps.extend(dex_gaps(mkt))
     if treasury.get("sol") is None:
         data_gaps.append("treasury_sol")
     # holdings is None when the read failed; an empty list means genuinely no tokens.
@@ -686,6 +689,10 @@ async def public_token(request: Request):
         "treasury_address": treasury_addr,
         "treasury_sol": treasury.get("sol"),
         "treasury_token_balance": treasury.get("token_balance"),
+        # Traded activity. Chain reads cannot supply these; they come from
+        # DexScreener. Fields absent while the token is on a bonding curve stay
+        # null so the UI shows DATA GAP rather than claiming zero liquidity.
+        "market": mkt,
         "data_gaps": data_gaps,
         "fetched_at": utcnow(),
     }
