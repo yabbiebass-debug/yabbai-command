@@ -67,7 +67,7 @@ export default function ApiPulse() {
   useEffect(() => {
     const loadHealthData = async () => {
       try {
-        const response = await fetch(`${API}/health/details`);
+        const response = await fetch(`${API}/health/details`, { credentials: 'include',  credentials: 'include' });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }

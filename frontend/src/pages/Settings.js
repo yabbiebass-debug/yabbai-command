@@ -61,7 +61,7 @@ export default function Settings() {
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
-    fetch(`${API}/settings`)
+    fetch(`${API}/settings`, { credentials: 'include',  credentials: 'include' })
       .then(r => r.json())
       .then(d => { setCfg(prev => ({ ...prev, ...d })); setLoading(false); })
       .catch((e) => {
@@ -75,7 +75,7 @@ export default function Settings() {
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API}/settings`, {
+      const res = await fetch(`${API}/settings`, { credentials: 'include', 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cfg),

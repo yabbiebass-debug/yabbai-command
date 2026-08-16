@@ -28,15 +28,15 @@ export default function CommandCentre() {
     const loadRealData = async () => {
       try {
         // Fetch revenue status
-        const revenueRes = await fetch(`${API}/revenue/status`);
+        const revenueRes = await fetch(`${API}/revenue/status`, { credentials: 'include',  credentials: 'include' });
         const revenueData = await revenueRes.json();
 
         // Fetch agent pool status
-        const agentRes = await fetch(`${API}/agents/status`);
+        const agentRes = await fetch(`${API}/agents/status`, { credentials: 'include',  credentials: 'include' });
         const agentData = await agentRes.json();
 
         // Fetch live tracking status
-        const liveRes = await fetch(`${API}/revenue/live/status`);
+        const liveRes = await fetch(`${API}/revenue/live/status`, { credentials: 'include',  credentials: 'include' });
         const liveData = await liveRes.json();
 
         // Update stats with REAL data

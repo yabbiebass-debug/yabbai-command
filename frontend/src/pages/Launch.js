@@ -38,7 +38,7 @@ export default function Launch() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch(`${API}/token-mint`)
+    fetch(`${API}/token-mint`, { credentials: 'include',  credentials: 'include' })
       .then(r => r.json())
       .then(d => { if (d.configured) { setSavedCfg(d); setStep('done'); } })
       .catch(() => {});
@@ -66,7 +66,7 @@ export default function Launch() {
     runSequence();
     await new Promise(r => setTimeout(r, SEQUENCE.length * 600));
     try {
-      const res = await fetch(`${API}/token-mint`, {
+      const res = await fetch(`${API}/token-mint`, { credentials: 'include', 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -87,7 +87,7 @@ export default function Launch() {
   };
 
   const handleReset = async () => {
-    await fetch(`${API}/token-mint`, { method: 'DELETE' }).catch(() => {});
+    await fetch(`${API}/token-mint`, { credentials: 'include',  method: 'DELETE' }).catch(() => {});
     setSavedCfg(null);
     setStep('config');
     setMintAddr('');
