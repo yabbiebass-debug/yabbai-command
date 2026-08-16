@@ -482,12 +482,28 @@ def _rpc_host(url: str) -> str:
 
 
 async def _configured_mint() -> Optional[str]:
+    """Mint address, from env first then the database.
+
+    A fresh deployment has an empty database, so requiring the mint to be seeded
+    there means the public endpoints report `configured: false` until someone
+    writes a row — through a director-only route they cannot reach yet. Reading
+    TOKEN_MINT from the environment makes a deployment self-configuring, while the
+    database still wins nothing and loses nothing for existing installs.
+    """
+    env_mint = (os.environ.get("TOKEN_MINT") or "").strip()
+    if env_mint and is_valid_base58(env_mint):
+        return env_mint
+
     doc = await db.token_mint_config.find_one({})
     mint = (doc or {}).get("mint")
     return mint if mint and is_valid_base58(mint) else None
 
 
 async def _configured_treasury() -> str:
+    env_treasury = (os.environ.get("TREASURY_WALLET") or "").strip()
+    if env_treasury and is_valid_base58(env_treasury):
+        return env_treasury
+
     doc = await db.settings.find_one({})
     return (doc or {}).get("treasury_wallet") or TREASURY_WALLET
 
