@@ -95,6 +95,32 @@ let webpackConfig = {
           && plugin.constructor.name !== 'ForkTsCheckerWebpackPlugin'
       );
 
+      // Emit ASCII-only JavaScript, escaping non-ASCII as \uXXXX.
+      //
+      // Render serves the bundle as `application/javascript` with no charset
+      // parameter, while the HTML and CSS both carry charset=utf-8. Without a
+      // charset on the script the browser decoded UTF-8 bytes as Latin-1, so
+      // em-dashes, arrows and the lightning glyph rendered as mojibake.
+      //
+      // Setting a Content-Type header would also fix it, but only for as long as
+      // that header survives. Escaping at build time makes the output pure ASCII,
+      // so the served charset stops mattering anywhere it is hosted.
+      const terser = (webpackConfig.optimization &&
+        webpackConfig.optimization.minimizer || [])
+        .find((m) => m && m.constructor && m.constructor.name === 'TerserPlugin');
+      if (terser) {
+        terser.options = terser.options || {};
+        terser.options.terserOptions = terser.options.terserOptions || {};
+        terser.options.terserOptions.output = {
+          ...(terser.options.terserOptions.output || {}),
+          ascii_only: true,
+        };
+        terser.options.terserOptions.format = {
+          ...(terser.options.terserOptions.format || {}),
+          ascii_only: true,
+        };
+      }
+
       return webpackConfig;
     },
   },
