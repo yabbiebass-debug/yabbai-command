@@ -1,0 +1,49 @@
+# Cloudflare Tunnel ingress for YABBAI.
+#
+# Fill in `tunnel` and `credentials-file` after running:
+#   cloudflared tunnel login
+#   cloudflared tunnel create yabbai
+#
+# Then route DNS:
+#   cloudflared tunnel route dns yabbai token.yabbai.network
+#   cloudflared tunnel route dns yabbai holders.yabbai.network
+#
+# Run it:
+#   cloudflared tunnel --config cloudflared-config.yml run yabbai
+#
+# Ordering matters: rules match top to bottom, first match wins, and the final
+# catch-all must be last.
+
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: REPLACE_WITH_PATH_TO_TUNNEL_JSON
+
+ingress:
+  # ── token.yabbai.network — director command centre ─────────────────────────
+  # API first, so it is not swallowed by the SPA fallback below. Serving the API
+  # on the same hostname as the app keeps every request same-origin: no CORS
+  # preflight, and the .yabbai.network session cookie is sent normally.
+  - hostname: token.yabbai.network
+    path: ^/api/.*
+    service: http://localhost:8000
+
+  - hostname: token.yabbai.network
+    service: http://localhost:4174
+
+  # ── holders.yabbai.network — public holder view ────────────────────────────
+  # Same API, but this build only ever calls the public endpoints and sends
+  # credentials: omit, so no session ever reaches the public origin.
+  - hostname: holders.yabbai.network
+    path: ^/api/.*
+    service: http://localhost:8000
+
+  - hostname: holders.yabbai.network
+    service: http://localhost:4173
+
+  # Anything not matched above is refused rather than falling through to a
+  # service that was not meant to be public.
+  - service: http_status:404
+
+# Origin is plain HTTP on loopback; Cloudflare terminates TLS at its edge.
+originRequest:
+  connectTimeout: 30s
+  noTLSVerify: false

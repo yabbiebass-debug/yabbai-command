@@ -1,0 +1,96 @@
+# Render Blueprint for YABBAI.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> point at this repo.
+# Render reads this file and creates all three services.
+#
+# MongoDB is NOT included: Render has no managed MongoDB. Create a free M0 cluster
+# at mongodb.com/atlas, then paste its connection string into MONGO_URL below via
+# the Render dashboard. Allow-list 0.0.0.0/0 in Atlas network access, since Render
+# free instances do not have static egress IPs.
+
+services:
+  # ── Backend API ────────────────────────────────────────────────────────────
+  - type: web
+    name: yabbai-api
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r backend/requirements.txt
+    # 0.0.0.0 and $PORT are required — Render routes to the port it assigns.
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT --app-dir backend
+    healthCheckPath: /api/
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      # Secrets are set in the dashboard, never committed.
+      - key: MONGO_URL
+        sync: false
+      - key: SOLANA_RPC_URL
+        sync: false
+      - key: JUPITER_API_KEY
+        sync: false
+      - key: DB_NAME
+        value: yabbai
+      - key: HUB_AUTH_URL
+        value: https://yabbai.network
+      - key: SNAPSHOT_INTERVAL_SECONDS
+        value: "300"
+      - key: CORS_ORIGINS
+        value: https://yabbai.network,https://command.yabbai.network,https://token.yabbai.network,https://holders.yabbai.network
+
+  # ── Director command centre ────────────────────────────────────────────────
+  - type: web
+    name: yabbai-token
+    runtime: static
+    plan: free
+    buildCommand: cd frontend && npm install --legacy-peer-deps && npm run build
+    staticPublishPath: frontend/build
+    envVars:
+      # Absolute API base: this static host cannot serve /api itself.
+      - key: REACT_APP_BACKEND_URL
+        sync: false
+      - key: CI
+        value: "false"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+
+  # ── Public holder view ─────────────────────────────────────────────────────
+  # build:holders is what strips admin code from the bundle. Using the default
+  # build command here would publish the full command app to the public URL.
+  - type: web
+    name: yabbai-holders
+    runtime: static
+    plan: free
+    buildCommand: cd frontend && npm install --legacy-peer-deps && npm run build:holders
+    staticPublishPath: frontend/build
+    envVars:
+      - key: REACT_APP_BACKEND_URL
+        sync: false
+      - key: CI
+        value: "false"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin

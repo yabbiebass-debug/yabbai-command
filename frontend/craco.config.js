@@ -84,6 +84,17 @@ let webpackConfig = {
       if (config.enableHealthCheck && healthPluginInstance) {
         webpackConfig.plugins.push(healthPluginInstance);
       }
+
+      // Drop the TypeScript type checker. This project is plain JS — no tsconfig.json
+      // and no .ts/.tsx sources — so it checks nothing. It also ships a nested
+      // ajv-keywords@3 that expects ajv@6 internals, which crashes the build once
+      // ajv is pinned to 8 for schema-utils@4. Removing it fixes the build and cuts
+      // build time; re-add it if TypeScript is ever introduced.
+      webpackConfig.plugins = webpackConfig.plugins.filter(
+        (plugin) => plugin && plugin.constructor
+          && plugin.constructor.name !== 'ForkTsCheckerWebpackPlugin'
+      );
+
       return webpackConfig;
     },
   },

@@ -47,11 +47,9 @@ mission.deploy()
   .then(result => treasury.sweep(result.yield))
   .catch(err => logger.alert(err));
 
-// ⚠️ PROJECTED APY (NOT ACTUAL RETURNS)
-// Expected APY range: ${Math.round(config.risk * 8 + 200)}% — ${Math.round(config.risk * 15 + 400)}%
-// Max drawdown: ${(config.risk * 0.3).toFixed(1)}%
-// Daily yield target: $${(config.autonomy * 2.8 + 50).toFixed(2)}
-// NOTE: These are ESTIMATES based on risk parameters, not guaranteed returns.`;
+// This is a saved configuration. It is not executed by anything.
+// Returns are not projected here — see the Performance panel for the
+// realised figure measured from recorded treasury snapshots.`;
 }
 
 export default function Mission() {
@@ -70,6 +68,7 @@ export default function Mission() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const [loadingMissions, setLoadingMissions] = useState(true);
+  const [perf, setPerf] = useState(null);
   const consoleRef = useRef(null);
 
   useEffect(() => {
@@ -90,6 +89,18 @@ export default function Mission() {
   }, []);
 
   useEffect(() => { fetchMissions(); }, [fetchMissions]);
+
+  // Realised performance, measured from recorded treasury snapshots. When there is
+  // not enough history the backend says so and this panel shows DATA GAP rather
+  // than falling back to a projection.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API}/performance?window_days=30`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setPerf(d); })
+      .catch(() => { if (!cancelled) setPerf({ available: false, reason: 'unreachable' }); });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleGenerate = async () => {
     setThinking(true);
@@ -121,8 +132,8 @@ export default function Mission() {
           self_improve: config.selfImprove,
           locked_values: config.lockedValues,
           plan: missionPlan,
-          status: 'active',
-          estimated_apy: Math.round(config.risk * 8 + 200),
+          // Nothing executes saved missions, so "active" would be a false claim.
+          status: 'saved',
         }),
       });
       if (!res.ok) throw new Error('Save failed');
@@ -174,17 +185,46 @@ export default function Mission() {
         <span className="badge badge-green">{deployCount} SAVED</span>
       </div>
 
-      {/* APY Disclaimer Banner */}
-      <div style={{ marginBottom: 24, padding: 16, background: 'rgba(245,166,35,0.08)', borderRadius: 8, border: '1px solid rgba(245,166,35,0.25)' }}>
+      {/* Realised performance — measured, never projected */}
+      <div style={{ marginBottom: 24, padding: 16, background: 'rgba(20,241,149,0.06)', borderRadius: 8, border: '1px solid rgba(20,241,149,0.25)' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <div style={{ fontSize: 24, lineHeight: 1 }}>⚠️</div>
+          <div style={{ fontSize: 24, lineHeight: 1 }}>📈</div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#F5A623', marginBottom: 6 }}>
-              APY VALUES ARE PROJECTED ESTIMATES ONLY
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#14F195', marginBottom: 6 }}>
+              REALISED TREASURY PERFORMANCE — LAST 30D
             </div>
-            <div style={{ fontSize: 12, color: '#e8f0ff', lineHeight: 1.5 }}>
-              The APY percentages shown are calculated projections based on risk parameters, NOT actual trading results. No real trading is executed. Mission payouts (if implemented) will go to: <span style={{ fontFamily: 'var(--font-mono)', color: '#14F195' }}>TREASURY WALLET ONLY (HTN1fvH...SZV5i)</span>
-            </div>
+            {!perf ? (
+              <div style={{ fontSize: 12, color: '#8fa3bf' }}>Reading treasury snapshots…</div>
+            ) : perf.available ? (
+              <div style={{ fontSize: 12, color: '#e8f0ff', lineHeight: 1.6 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: perf.period_return_pct >= 0 ? '#14F195' : '#ff6060' }}>
+                  {perf.period_return_pct >= 0 ? '+' : ''}{perf.period_return_pct}%
+                </span>
+                <span style={{ color: '#8fa3bf' }}> over {perf.elapsed_days}d
+                  {' '}({perf.performance_sol >= 0 ? '+' : ''}{perf.performance_sol} SOL)</span>
+                <div style={{ marginTop: 6, color: '#8fa3bf' }}>
+                  Measured from {perf.snapshot_count} snapshots. Net external flows of{' '}
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{perf.net_flows_sol} SOL</span>{' '}
+                  were backed out, so deposits and withdrawals are not counted as performance.
+                  {perf.annualised_pct !== null && perf.annualised_pct !== undefined
+                    ? <> Annualised: <span style={{ fontFamily: 'var(--font-mono)' }}>{perf.annualised_pct}%</span> (extrapolation).</>
+                    : <> {perf.annualised_unavailable_reason}</>}
+                </div>
+                {perf.warning && (
+                  <div style={{ marginTop: 6, color: '#F5A623' }}>⚠️ {perf.warning}</div>
+                )}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: '#e8f0ff', lineHeight: 1.5 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', color: '#F5A623' }}>DATA GAP</span>
+                {' — '}{perf.detail || 'Performance is unavailable.'}
+                <div style={{ marginTop: 6, color: '#8fa3bf' }}>
+                  Saved missions are configurations only; nothing executes them, so they
+                  produce no yield. This figure is measured from real treasury snapshots
+                  and appears once there is history to measure.
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -275,13 +315,17 @@ export default function Mission() {
           )}
 
           <div className="card">
-            <p className="section-label" style={{ marginBottom: 12 }}>PROJECTED METRICS</p>
+            {/* These are the configuration values themselves, which are real. The
+                previous card showed APY, daily yield and max drawdown derived from
+                the sliders (risk*8+200, autonomy*2.8+50, risk*0.3) — none of those
+                measured anything, so they are gone rather than relabelled. */}
+            <p className="section-label" style={{ marginBottom: 12 }}>CONFIGURATION</p>
             <div className="grid-2">
               {[
-                { l: 'EXPECTED APY', v: `${Math.round(config.risk * 8 + 200)}–${Math.round(config.risk * 15 + 400)}%`, c: '#14F195' },
-                { l: 'DAILY YIELD', v: `$${(config.autonomy * 2.8 + 50).toFixed(2)}`, c: '#9945FF' },
-                { l: 'MAX DRAWDOWN', v: `${(config.risk * 0.3).toFixed(1)}%`, c: '#F5A623' },
-                { l: 'RISK SCORE', v: `${config.risk}/100`, c: '#F5A623' },
+                { l: 'RISK SETTING', v: `${config.risk}/100`, c: '#F5A623' },
+                { l: 'AUTONOMY', v: `${config.autonomy}/100`, c: '#9945FF' },
+                { l: 'REINVEST RATE', v: `${config.reinvest}%`, c: '#9945FF' },
+                { l: 'EXECUTION', v: 'NOT WIRED', c: '#8fa3bf' },
               ].map(({ l, v, c }) => (
                 <div key={l}>
                   <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 900, color: c }}>{v}</div>
@@ -314,8 +358,7 @@ export default function Mission() {
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070', marginLeft: 10 }}>{m.mission_type}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span className={`badge ${m.status === 'active' ? 'badge-green' : 'badge-amber'}`}>{m.status}</span>
-                  {m.estimated_apy && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#14F195' }}>{m.estimated_apy}% APY</span>}
+                  <span className="badge badge-amber">{m.status || 'saved'}</span>
                   <button className="btn btn-outline btn-sm" onClick={() => loadMission(m)}>Load</button>
                   <button className="btn btn-danger btn-sm" onClick={() => handleDelete(m.id, m.name)} disabled={deleting === m.id}>
                     {deleting === m.id ? '...' : 'Del'}

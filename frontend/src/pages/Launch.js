@@ -4,6 +4,9 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const LAUNCHPADS = [
+  // YABBAI itself launched here — bonding curve graduating to a Meteora DLMM pool,
+  // with mint and freeze authority revoked at creation.
+  { id: 'jupiter-studio', name: 'Jupiter Studio', desc: 'Bonding curve → Meteora DLMM, authorities revoked', color: '#14F195' },
   { id: 'pump', name: 'pump.fun', desc: 'Fast meme launch, instant liquidity', color: '#9945FF' },
   { id: 'meteora', name: 'Meteora', desc: 'DLMM dynamic liquidity', color: '#14F195' },
   { id: 'raydium', name: 'Raydium', desc: 'AMM v4 standard', color: '#F5A623' },
@@ -25,7 +28,7 @@ const SEQUENCE = [
 
 export default function Launch() {
   const [step, setStep] = useState('config'); // config | launching | done
-  const [selectedPad, setSelectedPad] = useState('pump');
+  const [selectedPad, setSelectedPad] = useState('jupiter-studio');
   const [mintAddr, setMintAddr] = useState('');
   const [treasury, setTreasury] = useState('');
   const [seqIdx, setSeqIdx] = useState(0);

@@ -75,6 +75,7 @@ export default function YabbaiApp() {
   const [aiConfig, setAiConfig] = useState({ autonomy: 75, risk: 40, reinvest: 60 });
   const [toggles, setToggles] = useState({ selfImprove: true, autoReinvest: true });
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState(null);
   const mintRef = useRef(null);
 
   // Load token mint config
@@ -149,6 +150,21 @@ export default function YabbaiApp() {
     return () => clearInterval(id);
   }, [mintCfg, toastError]);
 
+  // Live mainnet token facts. Anything the RPC cannot serve arrives as null and is
+  // listed in data_gaps; this panel renders DATA GAP for those rather than a number.
+  useEffect(() => {
+    if (!mintCfg?.configured) return;
+    const load = () => {
+      fetch(`${API}/token-stats`)
+        .then(r => r.json())
+        .then(d => { if (d.ok) setStats(d); })
+        .catch(e => console.error('token-stats fetch failed:', e));
+    };
+    load();
+    const id = setInterval(load, 60000);
+    return () => clearInterval(id);
+  }, [mintCfg]);
+
   const handleSweep = async () => {
     if (!mintCfg?.configured) {
       toastError('Configure token mint in Settings first');
@@ -215,6 +231,75 @@ export default function YabbaiApp() {
           <span style={{ fontSize: 12, color: '#3a5070', marginLeft: 10 }}>USDC</span>
         </div>
       </div>
+
+      {/* On-chain facts. Every value here is read from mainnet; nothing is derived
+          from a slider or a formula. Unavailable reads render DATA GAP. */}
+      {mintCfg?.configured && (
+        <div className="card fade-in-2" style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span className="section-label" style={{ margin: 0 }}>ON-CHAIN — MAINNET</span>
+            {stats?.data_gaps?.length > 0 && (
+              <span className="badge badge-amber" title={`Unavailable: ${stats.data_gaps.join(', ')}`}>
+                {stats.data_gaps.length} DATA GAP{stats.data_gaps.length > 1 ? 'S' : ''}
+              </span>
+            )}
+          </div>
+          <div className="grid-3">
+            {[
+              {
+                l: 'SUPPLY',
+                v: stats?.supply?.supply != null
+                  ? stats.supply.supply.toLocaleString(undefined, { maximumFractionDigits: 0 })
+                  : 'DATA GAP',
+              },
+              {
+                l: 'HOLDERS',
+                v: stats?.holders?.holders != null
+                  ? stats.holders.holders.toLocaleString()
+                  : 'DATA GAP',
+              },
+              {
+                l: 'MARKET CAP',
+                v: stats?.market_cap_usd != null
+                  ? `$${stats.market_cap_usd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                  : 'DATA GAP',
+              },
+              {
+                l: 'TOP-20 CONCENTRATION',
+                v: stats?.top_concentration_pct != null
+                  ? `${stats.top_concentration_pct.toFixed(2)}%`
+                  : 'DATA GAP',
+              },
+              {
+                l: 'MINT AUTHORITY',
+                v: stats?.authorities
+                  ? (stats.authorities.mint_revoked ? 'REVOKED' : 'ACTIVE')
+                  : 'DATA GAP',
+              },
+              {
+                l: 'FREEZE AUTHORITY',
+                v: stats?.authorities
+                  ? (stats.authorities.freeze_revoked ? 'REVOKED' : 'ACTIVE')
+                  : 'DATA GAP',
+              },
+            ].map(({ l, v }) => (
+              <div key={l} style={{ marginBottom: 10 }}>
+                <div style={{
+                  fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 900,
+                  color: v === 'DATA GAP' ? '#3a5070' : (v === 'ACTIVE' ? '#F5A623' : '#14F195'),
+                }}>{v}</div>
+                <div className="stat-label">{l}</div>
+              </div>
+            ))}
+          </div>
+          {stats?.data_gaps?.includes('holder_count') && (
+            <div style={{ fontSize: 11, color: '#8fa3bf', marginTop: 6 }}>
+              Holder count needs an RPC that allows <span style={{ fontFamily: 'var(--font-mono)' }}>getProgramAccounts</span>.
+              The public mainnet endpoint blocks it — set a Helius RPC URL in Settings.
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid-2 fade-in-2" style={{ marginBottom: 24 }}>
         {/* Chart */}

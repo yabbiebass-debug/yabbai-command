@@ -41,6 +41,9 @@ class CycleAgent:
 
     def __init__(self, agent_id: str, phase: Phase, db, revenue_system):
         self.agent_id = agent_id
+        # home_phase is the pool's bookkeeping key and never changes; current_phase
+        # walks all five phases during run_cycle and is display-only.
+        self.home_phase = phase
         self.current_phase = phase
         self.status = AgentStatus.IDLE
         self.db = db
@@ -195,19 +198,32 @@ class CycleAgent:
         }
 
     async def phase_mission(self) -> Dict[str, Any]:
-        """MISSION: Execute revenue missions."""
-        missions_executed = 0
-        revenue_generated = 0.0
+        """MISSION: Run the orchestrator cycle.
 
-        # Run orchestrator cycle
+        Saved missions from the Mission Builder are configuration records only.
+        Nothing here reads or executes them, so they generate no revenue. The
+        counters below describe orchestrator actions, not mission earnings —
+        do not display them as mission performance.
+        """
+        actions_routed = 0
+
         if hasattr(self.revenue_system, 'orchestrator'):
             cycle_result = self.revenue_system.run_cycle()
-            missions_executed = cycle_result.get("actions_routed", 0)
+            actions_routed = cycle_result.get("actions_routed", 0)
+
+        saved_missions = await self.db.missions.count_documents({"status": "active"})
 
         return {
             "phase": "mission",
-            "missions_executed": missions_executed,
-            "revenue_generated": revenue_generated,
+            "actions_routed": actions_routed,
+            "saved_missions_active": saved_missions,
+            "saved_missions_executed": 0,
+            "execution_status": "not_wired",
+            "note": (
+                f"{saved_missions} mission(s) marked active but none are executed. "
+                "Mission Builder configs are not connected to any execution path."
+            ),
+            "revenue_generated": 0.0,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 

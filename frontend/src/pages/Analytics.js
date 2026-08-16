@@ -604,7 +604,10 @@ export default function Analytics() {
                       {[
                         { l: 'AUTONOMY', v: `${m.autonomy}%`, c: '#9945FF' },
                         { l: 'RISK', v: `${m.risk}%`, c: '#F5A623' },
-                        { l: 'APY EST', v: m.estimated_apy ? `${m.estimated_apy}%` : '--', c: '#14F195' },
+                        // Was "APY EST" from risk*8+200. Missions have no measured
+                        // return because nothing executes them; realised treasury
+                        // performance lives on the Performance panel instead.
+                        { l: 'REINVEST', v: m.reinvest != null ? `${m.reinvest}%` : '--', c: '#9945FF' },
                       ].map(({ l, v, c }) => (
                         <div key={l}>
                           <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, color: c }}>{v}</div>

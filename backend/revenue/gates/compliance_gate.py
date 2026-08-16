@@ -23,6 +23,10 @@ BANNED_CLAIM_PATTERNS = [
     (r"limited spots|only \d+ left|act now|expires (today|soon)", "Fake scarcity (banned)"),
     (r"\d+,?\d* (happy |satisfied )?customers", "Unverified customer-count claim — needs real data"),
     (r"as seen (on|in)", "'As seen on' claim — needs to be true and verifiable"),
+    # A percentage yield is a public investment claim. Nothing in this system measures
+    # realised APY, so any figure here is fabricated by construction.
+    (r"\d[\d,.]* ?% ?(apy|apr|returns?|gains?)", "Unsubstantiated yield claim (banned)"),
+    (r"\d[\d,.]* (holders|investors|members|users)", "Unverified holder/investor-count claim — needs real data"),
 ]
 
 
