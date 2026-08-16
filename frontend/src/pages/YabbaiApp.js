@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
+import PhaseJourney from '../components/PhaseJourney';
 import { useToast } from '../context/ToastContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -81,7 +82,7 @@ export default function YabbaiApp() {
 
   // Load token mint config
   useEffect(() => {
-    fetch(`${API}/token-mint`, { credentials: 'include',  credentials: 'include' })
+    fetch(`${API}/token-mint`, { credentials: 'include' })
       .then(r => {
         if (r.status === 429) {
           toastError('Rate limited - try again shortly');
@@ -107,7 +108,7 @@ export default function YabbaiApp() {
     if (!mintRef.current) return;
     
     const loadPriceHistory = () => {
-      fetch(`${API}/price-history?mint=${mintRef.current}&limit=60`, { credentials: 'include',  credentials: 'include' })
+      fetch(`${API}/price-history?mint=${mintRef.current}&limit=60`, { credentials: 'include' })
         .then(r => {
           if (r.status === 429) {
             toastError('Price history rate limited - retrying shortly');
@@ -135,7 +136,7 @@ export default function YabbaiApp() {
   useEffect(() => {
     if (!mintRef.current) return;
     const poll = () => {
-      fetch(`${API}/jupiter-price?mint=${mintRef.current}`, { credentials: 'include',  credentials: 'include' })
+      fetch(`${API}/jupiter-price?mint=${mintRef.current}`, { credentials: 'include' })
         .then(r => {
           if (r.status === 429) {
             toastError('Price API rate limited - retrying shortly');
@@ -156,7 +157,7 @@ export default function YabbaiApp() {
   useEffect(() => {
     if (!mintCfg?.configured) return;
     const load = () => {
-      fetch(`${API}/token-stats`, { credentials: 'include',  credentials: 'include' })
+      fetch(`${API}/token-stats`, { credentials: 'include' })
         .then(r => r.json())
         .then(d => { if (d.ok) setStats(d); })
         .catch(e => console.error('token-stats fetch failed:', e));
@@ -213,7 +214,7 @@ export default function YabbaiApp() {
             gap: 12,
           }}
         >
-          <div style={{ fontSize: 20, lineHeight: 1 }}>⚠️</div>
+          <div style={{ fontSize: 20, lineHeight: 1 }}>âš ï¸</div>
           <div style={{ flex: 1 }}>
             {/* This never meant the data was simulated. It fires whenever the token
                 config could not be read, which is usually a failed auth call rather
@@ -224,7 +225,7 @@ export default function YabbaiApp() {
             </div>
             <div style={{ fontSize: 13, color: '#e8f0ff', lineHeight: 1.5 }}>
               The token configuration could not be read, so market data is not shown.
-              No values on this page are simulated — they are simply absent.
+              No values on this page are simulated â€” they are simply absent.
               This usually means the session is not authenticated; sign in at the hub,
               or set the mint in Settings if none is configured.
             </div>
@@ -233,7 +234,7 @@ export default function YabbaiApp() {
       )}
 
       <div style={{ marginBottom: 24 }}>
-        <p className="section-label fade-in-1">⚡ YABBAI TOKEN</p>
+        <p className="section-label fade-in-1">âš¡ YABBAI TOKEN</p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <h1 className="font-display fade-in-2" style={{ fontSize: 36, fontWeight: 900, color: '#9945FF' }}>
             {mintCfg?.configured ? (mintCfg.mint.substring(0, 4) + '...' + mintCfg.mint.substring(mintCfg.mint.length - 4)) : 'NOT CONFIGURED'}
@@ -258,7 +259,7 @@ export default function YabbaiApp() {
       {mintCfg?.configured && (
         <div className="card fade-in-2" style={{ marginBottom: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <span className="section-label" style={{ margin: 0 }}>ON-CHAIN — MAINNET</span>
+            <span className="section-label" style={{ margin: 0 }}>ON-CHAIN â€” MAINNET</span>
             {stats?.data_gaps?.length > 0 && (
               <span className="badge badge-amber" title={`Unavailable: ${stats.data_gaps.join(', ')}`}>
                 {stats.data_gaps.length} DATA GAP{stats.data_gaps.length > 1 ? 'S' : ''}
@@ -316,7 +317,7 @@ export default function YabbaiApp() {
           {stats?.data_gaps?.includes('holder_count') && (
             <div style={{ fontSize: 11, color: '#8fa3bf', marginTop: 6 }}>
               Holder count needs an RPC that allows <span style={{ fontFamily: 'var(--font-mono)' }}>getProgramAccounts</span>.
-              The public mainnet endpoint blocks it — set a Helius RPC URL in Settings.
+              The public mainnet endpoint blocks it â€” set a Helius RPC URL in Settings.
             </div>
           )}
         </div>
@@ -345,7 +346,7 @@ export default function YabbaiApp() {
               border: '1px dashed rgba(58,80,112,0.3)'
             }}>
               <div style={{ textAlign: 'center', color: '#3a5070' }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>ðŸ“Š</div>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700 }}>NO DATA AVAILABLE</div>
                 <div style={{ fontSize: 11, marginTop: 4 }}>Configure token mint in Settings</div>
               </div>
@@ -389,7 +390,7 @@ export default function YabbaiApp() {
         <div className="card">
           <p className="section-label" style={{ marginBottom: 14 }}>JUPITER SWAP</p>
           <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-            {['USDC → TOKEN', 'TOKEN → USDC'].map(label => (
+            {['USDC â†’ TOKEN', 'TOKEN â†’ USDC'].map(label => (
               <button
                 key={label}
                 className={`btn btn-sm ${swapFrom === label.split(' ')[0] ? 'btn-primary' : 'btn-outline'}`}
@@ -434,7 +435,7 @@ export default function YabbaiApp() {
               >{s}%</button>
             ))}
           </div>
-          {/* This button had no onClick — it was inert. Executing a swap needs a
+          {/* This button had no onClick â€” it was inert. Executing a swap needs a
               connected wallet, a live route quote and signing, none of which this
               page does. Rather than fake it, hand off to Jupiter, which performs
               the actual swap with real routing and real slippage. */}
@@ -452,7 +453,7 @@ export default function YabbaiApp() {
               opacity: mintCfg?.configured ? 1 : 0.5,
             }}
           >
-            {mintCfg?.configured ? 'Open in Jupiter ↗' : 'Configure Token First'}
+            {mintCfg?.configured ? 'Open in Jupiter â†—' : 'Configure Token First'}
           </a>
           {currentPrice && (
             <div style={{ marginTop: 10, fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070', lineHeight: 1.5 }}>
@@ -466,41 +467,25 @@ export default function YabbaiApp() {
         {/* Agent pool phases, read from /api/agents/status.
             This previously rendered a hardcoded array: PUMP and ESKY permanently
             COMPLETE, MISSION permanently ACTIVE at 68%. Those values described
-            nothing — no phase has a completion percentage, and the pool does not
+            nothing â€” no phase has a completion percentage, and the pool does not
             progress through them in sequence. Every agent walks all five phases
             each cycle. Cycle counts are real; progress bars were not. */}
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
-            <p className="section-label" style={{ margin: 0 }}>AGENT POOL — BY PHASE</p>
+            <p className="section-label" style={{ margin: 0 }}>AGENT POOL â€” BY PHASE</p>
             {agentPool?.total_agents != null && (
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070' }}>
-                {agentPool.total_agents} agents · {agentPool.total_cycles?.toLocaleString()} cycles
+                {agentPool.total_agents} agents Â· {agentPool.total_cycles?.toLocaleString()} cycles
               </span>
             )}
           </div>
 
           {!agentPool ? (
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#3a5070', padding: '8px 0' }}>
-              DATA GAP — agent pool status unavailable
+              DATA GAP â€” agent pool status unavailable
             </div>
           ) : (
-            ['pump', 'esky', 'mission', 'scale', 'withdraw'].map(phase => {
-              const p = agentPool.phase_breakdown?.[phase] || {};
-              const active = p.active_agents ?? 0;
-              const cycles = p.total_cycles ?? 0;
-              return (
-                <div key={phase} style={{ marginBottom: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: active > 0 ? '#14F195' : '#3a5070' }}>
-                      {phase.toUpperCase()}
-                    </span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#8fa3bf' }}>
-                      {active} active · {cycles.toLocaleString()} cycles
-                    </span>
-                  </div>
-                </div>
-              );
-            })
+            <PhaseJourney pool={agentPool} />
           )}
 
           <p style={{ fontSize: 11, color: '#8fa3bf', lineHeight: 1.5, marginTop: 10 }}>
@@ -518,7 +503,7 @@ export default function YabbaiApp() {
               style={{ width: '100%', fontSize: 13, padding: '14px' }}
               disabled={true}
             >
-              ⚡ YIELD TRACKING (Configure Revenue System)
+              âš¡ YIELD TRACKING (Configure Revenue System)
             </button>
           </div>
         </div>

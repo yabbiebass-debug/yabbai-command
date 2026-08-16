@@ -35,6 +35,54 @@ class RpcError(RuntimeError):
     """Raised when the RPC endpoint returns a JSON-RPC error object."""
 
 
+class _PermanentRefusal(RpcError):
+    """This endpoint will never serve this method — move to the next one."""
+
+
+# Public endpoints used as fallbacks when the primary refuses a method. These are
+# free and rate-limited, which is fine: they only get asked for the handful of
+# methods a paid tier declines, not for the hot path.
+DEFAULT_FALLBACKS = [
+    "https://api.mainnet-beta.solana.com",
+    "https://solana-rpc.publicnode.com",
+    "https://rpc.ankr.com/solana",
+]
+
+# One shared client for the process. Previously every call opened its own
+# AsyncClient, so each read paid a fresh DNS lookup, TCP handshake and TLS
+# negotiation — several hundred milliseconds of pure setup, repeated per request.
+# Keep-alive connections make the second and later calls to a host dramatically
+# cheaper, which matters because a single page load fans out six of them.
+_CLIENT: Optional[httpx.AsyncClient] = None
+_CLIENT_LOCK = asyncio.Lock()
+
+
+async def _client(timeout: float) -> httpx.AsyncClient:
+    global _CLIENT
+    if _CLIENT is None or _CLIENT.is_closed:
+        async with _CLIENT_LOCK:
+            if _CLIENT is None or _CLIENT.is_closed:
+                _CLIENT = httpx.AsyncClient(
+                    timeout=timeout,
+                    limits=httpx.Limits(
+                        max_keepalive_connections=20,
+                        max_connections=40,
+                        keepalive_expiry=60.0,
+                    ),
+                    headers={"Content-Type": "application/json"},
+                    http2=False,
+                )
+    return _CLIENT
+
+
+async def close_client() -> None:
+    """Close the shared client. Call on application shutdown."""
+    global _CLIENT
+    if _CLIENT is not None and not _CLIENT.is_closed:
+        await _CLIENT.aclose()
+    _CLIENT = None
+
+
 class SolanaLive:
     """Thin async client over the Solana JSON-RPC. Read methods only."""
 
@@ -44,16 +92,37 @@ class SolanaLive:
         timeout: float = 12.0,
         max_concurrency: int = 3,
         max_retries: int = 3,
+        fallbacks: Optional[List[str]] = None,
     ):
+        # Providers differ in which methods they serve. Chainstack's shared tier
+        # refuses getProgramAccounts, getTokenLargestAccounts and
+        # getTokenAccountsByOwner outright, which blanks holder count, top-holder
+        # concentration and treasury token balance. Rather than accept those gaps,
+        # try the next endpoint when one refuses a method on plan grounds. The
+        # primary still serves everything it can, so its performance is unaffected.
+        self.endpoints: List[str] = [rpc_url] + [
+            f for f in (fallbacks or []) if f and f != rpc_url
+        ]
         self.rpc_url = rpc_url
         self.timeout = timeout
         self.max_retries = max_retries
         self._id = 0
+        # Methods a given endpoint has already refused. Avoids re-asking an
+        # endpoint that will never answer.
+        self._refused: Dict[str, set] = {ep: set() for ep in self.endpoints}
         # Callers fan out with asyncio.gather. Providers rate-limit bursts, and a
         # throttled read returns None, which the UI renders as DATA GAP — so an
         # unthrottled burst silently turns real data into "unavailable". Cap the
         # in-flight requests instead of hammering and losing fields.
         self._sem = asyncio.Semaphore(max_concurrency)
+
+    @staticmethod
+    def host_of(url: str) -> str:
+        """Host only — provider URLs embed API keys in the path or query."""
+        try:
+            return url.split("://", 1)[1].split("/", 1)[0].split("?", 1)[0]
+        except (IndexError, AttributeError):
+            return "unknown"
 
     # A provider refusing a method on plan grounds will refuse it forever. Retrying
     # wastes three round trips and delays the DATA GAP the UI needs to show.
@@ -84,21 +153,18 @@ class SolanaLive:
             return "rate" in msg or "too many" in msg or "throttl" in msg
         return False
 
-    async def _rpc(self, method: str, params: List[Any]) -> Any:
+    async def _try_endpoint(self, endpoint: str, method: str, params: List[Any]) -> Any:
+        """One endpoint, with retry on throttling. Raises _PermanentRefusal when the
+        provider will never serve this method, so the caller can move on."""
         self._id += 1
         payload = {"jsonrpc": "2.0", "id": self._id, "method": method, "params": params}
-
         last_error: Optional[Exception] = None
 
         for attempt in range(self.max_retries):
             async with self._sem:
                 try:
-                    async with httpx.AsyncClient(timeout=self.timeout) as client:
-                        resp = await client.post(
-                            self.rpc_url,
-                            json=payload,
-                            headers={"Content-Type": "application/json"},
-                        )
+                    client = await _client(self.timeout)
+                    resp = await client.post(endpoint, json=payload, timeout=self.timeout)
                 except Exception as e:  # transport-level failure
                     last_error = e
                     resp = None
@@ -110,12 +176,13 @@ class SolanaLive:
                     body = None
 
                 if self._is_permanent_refusal(body):
-                    # Provider will never serve this method on the current plan.
-                    raise RpcError(f"{method}: {body['error'].get('message')}")
+                    raise _PermanentRefusal(
+                        f"{self.host_of(endpoint)} refuses {method}: "
+                        f"{body['error'].get('message')}"
+                    )
                 if self._is_rate_limited(resp.status_code, body):
                     last_error = RpcError(f"{method}: rate limited ({resp.status_code})")
                 elif resp.status_code >= 400:
-                    # A genuine method rejection will not succeed on retry.
                     if body and isinstance(body.get("error"), dict):
                         raise RpcError(f"{method}: {body['error']}")
                     resp.raise_for_status()
@@ -129,6 +196,31 @@ class SolanaLive:
                 await asyncio.sleep(0.4 * (2 ** attempt))
 
         raise last_error or RpcError(f"{method}: failed after {self.max_retries} attempts")
+
+    async def _rpc(self, method: str, params: List[Any]) -> Any:
+        """Try each endpoint in turn. A provider that refuses a method on plan
+        grounds is skipped for that method from then on, rather than re-asked."""
+        last_error: Optional[Exception] = None
+
+        for endpoint in self.endpoints:
+            if method in self._refused.get(endpoint, ()):
+                continue
+            try:
+                result = await self._try_endpoint(endpoint, method, params)
+                if endpoint is not self.endpoints[0]:
+                    logger.info(
+                        f"{method} served by fallback {self.host_of(endpoint)}"
+                    )
+                return result
+            except _PermanentRefusal as e:
+                self._refused.setdefault(endpoint, set()).add(method)
+                logger.info(f"{e}; trying next endpoint")
+                last_error = e
+            except Exception as e:
+                logger.warning(f"{self.host_of(endpoint)} failed {method}: {e}")
+                last_error = e
+
+        raise last_error or RpcError(f"{method}: no endpoint could serve this")
 
     # ── Token facts ────────────────────────────────────────────────────────────
 
@@ -325,10 +417,11 @@ async def jupiter_price(mint: str, api_key: str = "", timeout: float = 8.0) -> O
     if api_key:
         headers["x-api-key"] = api_key
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(
-                "https://api.jup.ag/price/v3", params={"ids": mint}, headers=headers
-            )
+        client = await _client(timeout)
+        resp = await client.get(
+            "https://api.jup.ag/price/v3", params={"ids": mint},
+            headers=headers, timeout=timeout,
+        )
         if resp.status_code != 200:
             logger.warning(f"jupiter_price({mint}) HTTP {resp.status_code}")
             return None

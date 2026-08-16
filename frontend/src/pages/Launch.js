@@ -38,7 +38,7 @@ export default function Launch() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch(`${API}/token-mint`, { credentials: 'include',  credentials: 'include' })
+    fetch(`${API}/token-mint`, { credentials: 'include' })
       .then(r => r.json())
       .then(d => { if (d.configured) { setSavedCfg(d); setStep('done'); } })
       .catch(() => {});

@@ -50,7 +50,7 @@ export default function Withdraw() {
     if (!addr) return;
     setBalLoading(true);
     try {
-      const res = await fetch(`${API}/solana-balance?owner=${addr}`, { credentials: 'include',  credentials: 'include' });
+      const res = await fetch(`${API}/solana-balance?owner=${addr}`, { credentials: 'include' });
       const data = await res.json();
       if (data.ok) setWalletBal(data.sol);
     } catch (e) {

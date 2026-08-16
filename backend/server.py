@@ -73,6 +73,17 @@ api_router = APIRouter(prefix="/api")
 
 SOLANA_RPC = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 
+# Fallback endpoints, tried when the primary refuses a method on plan grounds.
+# Chainstack's shared tier declines getProgramAccounts, getTokenLargestAccounts and
+# getTokenAccountsByOwner, which blanks holder count, concentration and treasury
+# token balance. Set SOLANA_RPC_FALLBACKS to a comma-separated list to override.
+from solana_live import DEFAULT_FALLBACKS as _DEFAULT_RPC_FALLBACKS
+SOLANA_FALLBACKS = [
+    u.strip()
+    for u in os.environ.get("SOLANA_RPC_FALLBACKS", ",".join(_DEFAULT_RPC_FALLBACKS)).split(",")
+    if u.strip()
+]
+
 # ── In-memory cache ────────────────────────────────────────────────────────────
 PRICE_CACHE: Dict[str, Any] = {}   # mint -> {price, ts}
 BALANCE_CACHE: Dict[str, Any] = {} # owner -> {data, ts}
@@ -527,7 +538,7 @@ async def get_token_stats(request: Request, user: dict = Depends(require_directo
             "detail": "No token mint configured. Set one in Settings.",
         }
 
-    chain = SolanaLive(SOLANA_RPC)
+    chain = SolanaLive(SOLANA_RPC, fallbacks=SOLANA_FALLBACKS)
     treasury_addr = await _configured_treasury()
 
     supply, authorities, largest, holders, price, treasury = await asyncio.gather(
@@ -616,7 +627,7 @@ async def public_token(request: Request):
     if not mint:
         return {"ok": False, "configured": False}
 
-    chain = SolanaLive(SOLANA_RPC)
+    chain = SolanaLive(SOLANA_RPC, fallbacks=SOLANA_FALLBACKS)
     treasury_addr = await _configured_treasury()
 
     supply, authorities, largest, holders, price, treasury = await asyncio.gather(
@@ -730,7 +741,7 @@ async def ai_ask(request: Request, user: dict = Depends(require_director)):
     try:
         mint = await _configured_mint()
         if mint:
-            chain = SolanaLive(SOLANA_RPC)
+            chain = SolanaLive(SOLANA_RPC, fallbacks=SOLANA_FALLBACKS)
             supply, price = await asyncio.gather(
                 chain.token_supply(mint),
                 live_jupiter_price(mint, os.environ.get("JUPITER_API_KEY", "")),
@@ -782,7 +793,7 @@ async def record_live_snapshot() -> Dict[str, Any]:
     """
     mint = await _configured_mint()
     treasury_addr = await _configured_treasury()
-    chain = SolanaLive(SOLANA_RPC)
+    chain = SolanaLive(SOLANA_RPC, fallbacks=SOLANA_FALLBACKS)
     written = {"price": False, "treasury": False}
     now = datetime.now(timezone.utc)
 
