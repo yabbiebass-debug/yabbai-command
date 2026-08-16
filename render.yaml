@@ -33,6 +33,13 @@ services:
         value: yabbai
       - key: HUB_AUTH_URL
         value: https://yabbai.network
+      # Makes a fresh deployment self-configuring. Without this the database is
+      # empty on first boot and the public endpoints report configured: false,
+      # since the only way to seed the mint is a director-only route.
+      - key: TOKEN_MINT
+        value: FXzGbxw38xBzTdwRe4YoGBA9toWat4vSVvvAgN5Ljupx
+      - key: TREASURY_WALLET
+        value: HTN1fvHwbzKiMwh9YXZEe3eooiMdoCAs3TweWdiSZV5i
       - key: SNAPSHOT_INTERVAL_SECONDS
         value: "300"
       - key: CORS_ORIGINS
