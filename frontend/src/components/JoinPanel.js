@@ -26,12 +26,20 @@ import React, { useCallback, useEffect, useState } from 'react';
 
 const API = process.env.REACT_APP_BACKEND_URL || '';
 
+/**
+ * Defaults are real, public, stable URLs, so the block works without any build
+ * configuration. Each is still overridable by environment variable for a fork or
+ * a rebrand, and anything with no default and no variable set simply does not
+ * render — a dead social link on a token page reads as an abandoned project,
+ * which is worse than no link at all.
+ */
 const SOCIALS = [
+  { key: 'REACT_APP_INSTAGRAM', label: 'Instagram', fallback: 'https://instagram.com/basham.420' },
+  { key: 'REACT_APP_SOUNDCLOUD', label: 'SoundCloud', fallback: 'https://soundcloud.com/basham_x' },
   { key: 'REACT_APP_TELEGRAM', label: 'Telegram' },
   { key: 'REACT_APP_X', label: 'X' },
   { key: 'REACT_APP_DISCORD', label: 'Discord' },
-  { key: 'REACT_APP_GITHUB', label: 'GitHub' },
-].map((s) => ({ ...s, url: process.env[s.key] })).filter((s) => s.url);
+].map((s) => ({ ...s, url: process.env[s.key] || s.fallback })).filter((s) => s.url);
 
 export default function JoinPanel() {
   const [stats, setStats] = useState(null);
