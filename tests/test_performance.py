@@ -3,11 +3,13 @@
 The case that matters most is #3: depositing SOL into a treasury must NOT be reported
 as a gain. That is precisely the error the old `risk * 8 + 200` display invited.
 """
-import asyncio, sys
+import asyncio, os, sys
 from datetime import datetime, timezone, timedelta
 
-sys.path.insert(0, r"C:\Users\yabbi\yabb\yabbai-command\backend")
-from performance import treasury_performance
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend")
+)
+from performance import treasury_performance  # noqa: E402
 
 NOW = datetime.now(timezone.utc)
 

@@ -5,10 +5,13 @@ Reproduces the exact scenario from the dashboard - treasury goes 2.747 SOL to
 checks the fix reports roughly flat instead of a collapse.
 """
 import asyncio
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 
-sys.path.insert(0, r"C:\Users\yabbi\yabb\yabbai-command\backend")
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend")
+)
 from performance import treasury_performance  # noqa: E402
 
 NOW = datetime.now(timezone.utc)

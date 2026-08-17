@@ -12,8 +12,17 @@
 # committed. Everything else is safe in this file: mint and treasury addresses
 # are public on-chain.
 
+# Services and the domains attached to them in the Render dashboard:
+#
+#   yabbai-api      -> api.yabbai.network      (FastAPI backend)
+#   yabbai-token    -> token.yabbai.network    (director console, full build)
+#   yabbai-holders  -> holders.yabbai.network  (public view, build:holders)
+#
+# All three build from the same repo on main. The console and the public view
+# differ only in build command, and that difference is the whole isolation.
+
 services:
-  # == Backend API =============================================================
+  # == Backend API - api.yabbai.network ========================================
   - type: web
     name: yabbai-api
     runtime: python
@@ -67,11 +76,27 @@ services:
       - key: WEBHOOK_MAX_AGE_SECONDS
         value: "300"
 
-      # Never '*' while credentials are allowed.
-      - key: CORS_ORIGINS
-        value: https://yabbai.network,https://command.yabbai.network,https://token.yabbai.network,https://holders.yabbai.network
+      # Buyback guards. The defaults are in backend/revenue/buyback_engine.py;
+      # set these only to change them. Agents propose within these bounds and
+      # cannot execute - every buy is signed by the operator's own wallet.
+      - key: BUYBACK_MIN_RESERVE_SOL
+        value: "0.05"     # never spend below this; fees still have to be payable
+      - key: BUYBACK_MAX_FRACTION
+        value: "0.25"     # ceiling per proposal, before risk/reinvest scaling
+      - key: BUYBACK_MAX_IMPACT_PCT
+        value: "5.0"      # refuse a quote that moves the price more than this
+      - key: BUYBACK_COOLDOWN_MINUTES
+        value: "60"       # minimum gap between proposals
+      - key: BUYBACK_PROPOSAL_TTL_HOURS
+        value: "6"        # expire a queued proposal rather than leave a stale quote
 
-  # == Director console ========================================================
+      # Never '*' while credentials are allowed. Only hosts that actually serve
+      # the app: an origin left here after its service is gone is a credentialed
+      # entry point aimed at a name nobody is watching.
+      - key: CORS_ORIGINS
+        value: https://yabbai.network,https://token.yabbai.network,https://holders.yabbai.network
+
+  # == Director console - token.yabbai.network =================================
   - type: web
     name: yabbai-token
     runtime: static
@@ -107,10 +132,11 @@ services:
         name: Strict-Transport-Security
         value: max-age=31536000; includeSubDomains
 
-  # == Public holder view ======================================================
+  # == Public holder view - holders.yabbai.network ==============================
   # build:holders is the entire isolation. Running the default build here would
-  # publish the full command app - auth, wallet signing and all - to the public
-  # URL. Verified: 226 KB with no admin markers, versus 1091 KB for the console.
+  # publish the full console - auth, wallet signing, buybacks and all - to the
+  # public URL. Verified: 230 KB with no admin markers, versus 1131 KB for the
+  # console. tests/test_auth_surface.py covers the API side of the same boundary.
   - type: web
     name: yabbai-holders
     runtime: static
