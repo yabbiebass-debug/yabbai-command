@@ -24,26 +24,45 @@ const APP_READY = 'wallet-standard:app-ready';
 
 const SOLANA_CHAINS = ['solana:mainnet', 'solana:mainnet-beta'];
 
+// Wallets announce themselves asynchronously and at different times, so the
+// registry is accumulated once at module level and kept, rather than rebuilt on
+// each scan. A single snapshot taken too early finds nothing.
+const _registry = new Map();
+let _listening = false;
+
+function startListening() {
+  if (_listening || typeof window === 'undefined') return;
+  _listening = true;
+  const register = (event) => {
+    const wallet = event?.detail?.wallet || event?.detail;
+    if (!wallet?.name) return;
+    const chains = wallet.chains || [];
+    // Some builds report chains only after connecting, so accept a wallet that
+    // exposes Solana features even when its chain list is still empty.
+    const solanaish =
+      chains.some((c) => String(c).startsWith('solana:')) ||
+      Object.keys(wallet.features || {}).some((f) => f.startsWith('solana:'));
+    if (solanaish) _registry.set(wallet.name, wallet);
+  };
+  try {
+    window.addEventListener(STANDARD_EVENT, register);
+    // Wallets already registered re-announce when the app declares itself ready.
+    window.dispatchEvent(new Event(APP_READY));
+    // Some extensions inject late; ask again a few times.
+    [150, 600, 1500, 3000].forEach((ms) =>
+      setTimeout(() => {
+        try { window.dispatchEvent(new Event(APP_READY)); } catch { /* ignore */ }
+      }, ms)
+    );
+  } catch {
+    /* registry unavailable; globals below still apply */
+  }
+}
+
 /** Wallets discovered via the Wallet Standard registry. */
 function standardWallets() {
-  const found = [];
-  const register = ({ wallet }) => {
-    if (!wallet) return;
-    const chains = wallet.chains || [];
-    const supportsSolana = chains.some((c) => String(c).startsWith('solana:'));
-    if (!supportsSolana) return;
-    if (found.some((w) => w.name === wallet.name)) return;
-    found.push(wallet);
-  };
-
-  try {
-    window.addEventListener(STANDARD_EVENT, (event) => register(event.detail || {}));
-    // Wallets that registered before we listened re-announce on this event.
-    window.dispatchEvent(new Event(APP_READY));
-  } catch {
-    /* registry unavailable; fall back to globals below */
-  }
-  return found;
+  startListening();
+  return Array.from(_registry.values());
 }
 
 /** Older extensions that expose a global instead of registering. */
@@ -59,9 +78,15 @@ function legacyProviders() {
   push('Phantom', window.phantom?.solana || (window.solana?.isPhantom ? window.solana : null));
   push('Solflare', window.solflare?.isSolflare ? window.solflare : null);
   push('Backpack', window.backpack?.isBackpack ? window.backpack : null);
-  // MetaMask's Solana support registers via the standard; this catches builds
-  // that also expose a direct handle.
-  push('MetaMask', window.phantom?.solana === undefined ? window.metamask?.solana : null);
+
+  // MetaMask exposes Solana through the Wallet Standard, so it normally arrives
+  // via the registry. These are direct handles some builds also expose.
+  push('MetaMask', window.metamask?.solana || window.ethereum?.solana || null);
+
+  // A generic provider that is not one of the above.
+  if (window.solana && !window.solana.isPhantom && !out.some((p) => p.provider === window.solana)) {
+    push(window.solana.isSolflare ? 'Solflare' : 'Solana Wallet', window.solana);
+  }
   return out;
 }
 

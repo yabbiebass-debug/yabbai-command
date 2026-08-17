@@ -22,12 +22,13 @@ export default function WalletPanel({ api, mint }) {
   const [verified, setVerified] = useState({});
 
   useEffect(() => {
-    // Extensions register asynchronously; re-scan briefly after mount.
+    // Extensions inject at different times and some register seconds after page
+    // load, so a single scan at mount reliably misses them. Poll for a few
+    // seconds, then stop.
     const scan = () => setAvailable(detectWallets());
     scan();
-    const t1 = setTimeout(scan, 400);
-    const t2 = setTimeout(scan, 1500);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    const timers = [200, 600, 1200, 2000, 3200, 5000].map((ms) => setTimeout(scan, ms));
+    return () => timers.forEach(clearTimeout);
   }, []);
 
   const loadBalance = useCallback(async (address) => {
@@ -128,8 +129,21 @@ export default function WalletPanel({ api, mint }) {
 
       {available.length === 0 && (
         <div style={{ fontSize: 12, color: '#8fa3bf', lineHeight: 1.6 }}>
-          No Solana wallet detected. Phantom, MetaMask, Solflare and Backpack all
-          work — install or unlock one and this will pick it up.
+          No Solana wallet detected yet. Phantom, MetaMask, Solflare and Backpack
+          all work. If one is installed, unlock it and reload — extensions
+          register a few seconds after page load and a locked wallet stays hidden.
+          <div style={{ marginTop: 8, color: '#3a5070' }}>
+            Jupiter is not listed because it is not a wallet: it is a swap
+            aggregator that uses whichever wallet you connect here.
+          </div>
+        </div>
+      )}
+
+      {available.length > 0 && !available.some(w => /metamask/i.test(w.name)) && (
+        <div style={{ fontSize: 11, color: '#8fa3bf', lineHeight: 1.6, marginBottom: 10 }}>
+          MetaMask not listed? Its Solana support needs a recent version and a
+          Solana account created inside the extension. Without one it registers
+          as Ethereum-only and cannot appear here.
         </div>
       )}
 
