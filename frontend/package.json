@@ -62,8 +62,8 @@
   },
   "scripts": {
     "start": "craco start",
-    "build": "craco build",
-    "build:holders": "cross-env REACT_APP_BUILD_TARGET=holders craco build",
+    "build": "cross-env GENERATE_SOURCEMAP=false craco build && node scripts/seo.js",
+    "build:holders": "cross-env GENERATE_SOURCEMAP=false REACT_APP_BUILD_TARGET=holders craco build && cross-env REACT_APP_BUILD_TARGET=holders node scripts/seo.js",
     "start:holders": "cross-env REACT_APP_BUILD_TARGET=holders craco start",
     "test": "craco test"
   },

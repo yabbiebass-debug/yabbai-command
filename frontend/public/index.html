@@ -4,12 +4,98 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#000000" />
-        <meta name="description" content="Live on-chain statistics for YabbAI Token (YABBAI) on Solana." />
+
+        <!-- No icon was declared at all, so browsers fell back to a blank page
+             glyph on tabs, bookmarks and phone home screens. -->
+        <link rel="icon" type="image/png" href="/yabbai-logo.png" />
+        <link rel="apple-touch-icon" href="/yabbai-logo.png" />
+
+        <!--
+        DEFAULT: noindex. This file is shared by BOTH builds, and the command
+        console must never reach a search index. scripts/seo.js rewrites this
+        single line to "index, follow" in the holders build only.
+
+        Failing closed matters here: if the postbuild step is ever skipped or
+        errors, the result is an unlisted public page — recoverable. The
+        opposite default would put the director console in Google.
+        -->
+        <meta name="robots" content="noindex, nofollow" />
+
+        <title>YABBAI — Autonomous Income Platform</title>
+        <meta name="description" content="Live on-chain statistics for YabbAI Token (YABBAI) on Solana. Supply, holder count, price and treasury read directly from mainnet — never estimated." />
+
+        <!--
+        Canonical. The single most important tag on this page.
+
+        Scraper sites copy the markup wholesale, canonical tag included. When a
+        copy at some other domain carries a canonical pointing back here, Google
+        credits THIS origin and treats the copy as duplicate. It is the cheapest
+        defence there is against a lookalike domain outranking the original.
+
+        Absolute URL, not relative: a relative canonical resolves against the
+        copy's own host and defeats the entire purpose.
+        -->
+        <link rel="canonical" href="https://holders.yabbai.network/" />
+
+        <!-- Open Graph: controls the card when the link is pasted into
+             Telegram, Discord, X or Slack. Without these a shared link renders
+             as bare text, which reads as untrustworthy in exactly the places a
+             token community lives. -->
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="YABBAI" />
+        <meta property="og:url" content="https://holders.yabbai.network/" />
+        <meta property="og:title" content="YABBAI — live on-chain token statistics" />
+        <meta property="og:description" content="Supply, holders, price and treasury read live from Solana mainnet. Unreadable values show DATA GAP rather than a fabricated number." />
+        <meta property="og:image" content="https://holders.yabbai.network/yabbai-banner.jpg" />
+        <meta property="og:image:width" content="1600" />
+        <meta property="og:image:height" content="640" />
+        <meta property="og:image:alt" content="YABBAI live token statistics" />
+
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="YABBAI — live on-chain token statistics" />
+        <meta name="twitter:description" content="Supply, holders, price and treasury read live from Solana mainnet. Never estimated." />
+        <meta name="twitter:image" content="https://holders.yabbai.network/yabbai-banner.jpg" />
+
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Unbounded:wght@700;900&family=Syne:wght@400;600;800&family=Bebas+Neue&family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
-        <title>YABBAI — Autonomous Income Platform</title>
-        <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
+
+        <!--
+        Structured data. This is the anti-impersonation payload: a
+        machine-readable claim of which mint address is genuinely ours, served
+        from the domain that owns the name. A lookalike site can copy this
+        block, but it cannot serve it from yabbai.network.
+
+        Not subject to script-src in CSP — application/ld+json is a data block,
+        not executable script, so it survives the strict policy in netlify.toml.
+        -->
+        <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "YABBAI",
+          "url": "https://yabbai.network",
+          "description": "Autonomous income platform and token analytics on Solana.",
+          "identifier": {
+            "@type": "PropertyValue",
+            "name": "Solana token mint",
+            "value": "FXzGbxw38xBzTdwRe4YoGBA9toWat4vSVvvAgN5Ljupx"
+          },
+          "subjectOf": {
+            "@type": "WebSite",
+            "name": "YABBAI live token statistics",
+            "url": "https://holders.yabbai.network"
+          }
+        }
+        </script>
+
+        <!--
+        External, not inline. The CSP in netlify.toml is `script-src 'self'`
+        with no 'unsafe-inline', so this was silently blocked on every deployed
+        page and the handler never ran in production. Same origin satisfies
+        'self'. See public/error-shim.js.
+        -->
+        <script src="%PUBLIC_URL%/error-shim.js"></script>
 
         <!--
         Two third-party scripts were removed from this template.
@@ -34,6 +120,37 @@
     </head>
     <body>
         <noscript>You need to enable JavaScript to run this app.</noscript>
-        <div id="root"></div>
+
+        <!--
+        Crawler fallback. Googlebot renders JavaScript, but on a second pass
+        that can lag the first by days, and other crawlers (Telegram, Discord,
+        most SEO tools, Bing in practice) do not render at all. Previously they
+        all saw an empty <div id="root"> and nothing else.
+
+        React replaces #root on mount, so this markup is visible to a
+        non-rendering crawler and gone the instant the app boots. It states only
+        what is true regardless of chain reads — no numbers, since numbers here
+        could not honour DATA GAP.
+        -->
+        <div id="root">
+            <main>
+                <h1>YABBAI — live on-chain token statistics</h1>
+                <p>
+                    Supply, holder count, price, market cap, top-holder concentration and
+                    treasury balance for YabbAI Token (YABBAI) on Solana, read directly
+                    from mainnet.
+                </p>
+                <p>
+                    Official token mint:
+                    <code>FXzGbxw38xBzTdwRe4YoGBA9toWat4vSVvvAgN5Ljupx</code>
+                </p>
+                <p>
+                    Every figure is read from chain, from Jupiter, or measured from
+                    recorded observations. Values that cannot be read are shown as
+                    DATA GAP — never estimated, and never substituted with zero.
+                </p>
+                <p>Official site: <a href="https://yabbai.network">yabbai.network</a></p>
+            </main>
+        </div>
     </body>
 </html>
