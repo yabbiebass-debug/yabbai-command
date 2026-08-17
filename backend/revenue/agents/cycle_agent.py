@@ -67,6 +67,11 @@ class CycleAgent:
 
         phases = [Phase.PUMP, Phase.ESKY, Phase.MISSION, Phase.SCALE, Phase.WITHDRAW]
 
+        # PUMP measures once; the later phases operate on that same measurement
+        # rather than each re-reading chain. One RPC fan-out per cycle instead of
+        # four, and every phase reasons about the same instant.
+        measurement: Optional[Dict[str, Any]] = None
+
         for phase in phases:
             self.current_phase = phase
             self.status = AgentStatus.CYCLING
@@ -74,7 +79,9 @@ class CycleAgent:
 
             try:
                 logger.info(f"🤖 Agent {self.agent_id}: Running {phase.value.upper()} phase")
-                result = await self.execute_phase(phase)
+                result = await self.execute_phase(phase, measurement)
+                if phase == Phase.PUMP:
+                    measurement = result
                 cycle_result["phase_results"][phase.value] = result
 
                 # Track revenue
@@ -125,142 +132,243 @@ class CycleAgent:
         except Exception as e:
             logger.error(f"Failed to record achievement: {e}")
 
-    async def execute_phase(self, phase: Phase) -> Dict[str, Any]:
-        """Execute specific phase logic."""
+    async def execute_phase(
+        self, phase: Phase, measurement: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Execute specific phase logic, passing PUMP's measurement downstream."""
         if phase == Phase.PUMP:
             return await self.phase_pump()
         elif phase == Phase.ESKY:
-            return await self.phase_esky()
+            return await self.phase_esky(measurement)
         elif phase == Phase.MISSION:
-            return await self.phase_mission()
+            return await self.phase_mission(measurement)
         elif phase == Phase.SCALE:
-            return await self.phase_scale()
+            return await self.phase_scale(measurement)
         elif phase == Phase.WITHDRAW:
-            return await self.phase_withdraw()
+            return await self.phase_withdraw(measurement)
         else:
             return {"error": "Unknown phase"}
 
+    async def _token_context(self):
+        """Chain client, mint and treasury for this deployment, or None."""
+        import os
+        from solana_live import SolanaLive, jupiter_price, DEFAULT_FALLBACKS
+        from dexscreener import market as dex_market
+
+        mint = (os.environ.get("TOKEN_MINT") or "").strip()
+        if not mint:
+            doc = await self.db.token_mint_config.find_one({})
+            mint = (doc or {}).get("mint")
+        if not mint:
+            return None
+
+        treasury = (os.environ.get("TREASURY_WALLET") or "").strip()
+        if not treasury:
+            settings = await self.db.settings.find_one({}) or {}
+            treasury = settings.get("treasury_wallet")
+        if not treasury:
+            return None
+
+        rpc = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+        fallbacks = [
+            u.strip() for u in
+            os.environ.get("SOLANA_RPC_FALLBACKS", ",".join(DEFAULT_FALLBACKS)).split(",")
+            if u.strip()
+        ]
+        return {
+            "chain": SolanaLive(rpc, fallbacks=fallbacks),
+            "mint": mint,
+            "treasury": treasury,
+            "price_fn": jupiter_price,
+            "jupiter_key": os.environ.get("JUPITER_API_KEY", ""),
+            "dex_fn": dex_market,
+        }
+
     async def phase_pump(self) -> Dict[str, Any]:
-        """PUMP: Identify and acquire revenue opportunities."""
-        # Scan for opportunities
-        opportunities = []
+        """PUMP: measure the token's current on-chain and market state.
 
-        # Check product channel
-        if hasattr(self.revenue_system, 'products'):
-            product_opps = await self.scan_product_opportunities()
-            opportunities.extend(product_opps)
+        This used to return three hardcoded literals ($97 course, $2500 service,
+        $50 momentum trade) marked as placeholders. It now takes a real
+        measurement of the token this project actually launched.
+        """
+        ctx = await self._token_context()
+        if not ctx:
+            return {
+                "phase": "pump",
+                "measured": False,
+                "reason": "no token mint or treasury configured",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
-        # Check agency channel
-        if hasattr(self.revenue_system, 'agency'):
-            agency_opps = await self.scan_agency_opportunities()
-            opportunities.extend(agency_opps)
+        # Shared across agents inside a short window. Fifty agents measuring
+        # independently every ten seconds rate-limited Jupiter, which turned a
+        # real price into a DATA GAP through self-inflicted load alone.
+        from revenue.token_metrics import collect_cached
 
-        # Check trading channel (paper trades only)
-        if hasattr(self.revenue_system, 'trading'):
-            trading_opps = await self.scan_trading_opportunities()
-            opportunities.extend(trading_opps)
+        metrics = await collect_cached(
+            ctx["chain"], ctx["mint"], ctx["treasury"],
+            ctx["price_fn"], ctx["jupiter_key"], ctx["dex_fn"],
+        )
 
         return {
             "phase": "pump",
-            "opportunities_found": len(opportunities),
-            "opportunities": opportunities[:10],  # Top 10
+            "measured": True,
+            "metrics": metrics,
+            "cached": metrics.get("cached", False),
+            "data_gaps": metrics.get("data_gaps", []),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    async def phase_esky(self) -> Dict[str, Any]:
-        """ESKY: Cold outreach and lead generation."""
-        # Generate leads for agency channel
-        leads_generated = 0
-        campaigns_sent = 0
+    async def phase_esky(self, measurement: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """ESKY: put the measurement on ice — store it so history accumulates.
 
-        if hasattr(self.revenue_system, 'agency'):
-            # Propose lead generation action
-            action_data = {
-                "kind": "generate_leads",
-                "channel": "agency",
-                "agent": self.agent_id,
-                "usd_amount": 0.0,  # No cost for internal lead gen
-                "reversible": True,
-                "payload": {"target": 10, "method": "cold_outreach"},
-                "reason": f"Agent {self.agent_id} lead generation cycle",
+        Previously set `leads_generated = 10  # Simulated for now`. It now
+        preserves what PUMP measured, which is what gives SCALE something real to
+        compare against later. Rows are capped so the collection cannot grow
+        without bound.
+        """
+        if not measurement or not measurement.get("measured"):
+            return {
+                "phase": "esky",
+                "stored": False,
+                "reason": "nothing measured this cycle",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
-            result = self.revenue_system.propose_action(action_data)
-            if result.get("ok"):
-                leads_generated = 10  # Simulated for now
+        metrics = measurement.get("metrics") or {}
+
+        # Only the agent that actually measured writes a row. Without this, fifty
+        # agents sharing one cached measurement would each store an identical
+        # copy, and SCALE would then compare a row against its own duplicate and
+        # report no change forever.
+        if measurement.get("cached"):
+            return {
+                "phase": "esky",
+                "stored": False,
+                "reason": "measurement served from shared cache; already stored",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        doc = dict(metrics)
+        doc.pop("cached", None)
+        doc["agent_id"] = self.agent_id
+        doc["ts"] = datetime.now(timezone.utc)
+
+        try:
+            await self.db.token_measurements.insert_one(doc)
+            count = await self.db.token_measurements.count_documents({})
+            if count > 2000:
+                old = await self.db.token_measurements.find({}).sort("ts", 1) \
+                    .limit(count - 2000).to_list(count - 2000)
+                if old:
+                    await self.db.token_measurements.delete_many(
+                        {"_id": {"$in": [d["_id"] for d in old]}}
+                    )
+            stored = True
+        except Exception as e:
+            logger.error(f"{self.agent_id}: could not store measurement: {e}")
+            stored = False
 
         return {
             "phase": "esky",
-            "leads_generated": leads_generated,
-            "campaigns_sent": campaigns_sent,
-            "compliance_checked": True,
+            "stored": stored,
+            "price_usd": metrics.get("price_usd"),
+            "treasury_sol": metrics.get("treasury_sol"),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    async def phase_mission(self) -> Dict[str, Any]:
-        """MISSION: Run the orchestrator cycle.
+    async def phase_mission(self, measurement: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """MISSION: assess the measurement against operator thresholds.
 
-        Saved missions from the Mission Builder are configuration records only.
-        Nothing here reads or executes them, so they generate no revenue. The
-        counters below describe orchestrator actions, not mission earnings —
-        do not display them as mission performance.
+        Reads alert_price_drop_pct and alert_balance_low_sol from settings — the
+        knobs that already existed but were never consulted by anything — and
+        reports observations. Observations only: nothing here executes a trade or
+        moves funds, and a treasury movement still needs a human signature and an
+        allowlisted destination.
         """
-        actions_routed = 0
+        if not measurement or not measurement.get("measured"):
+            return {
+                "phase": "mission",
+                "assessed": False,
+                "reason": "nothing measured this cycle",
+                "revenue_generated": 0.0,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
-        if hasattr(self.revenue_system, 'orchestrator'):
-            cycle_result = self.revenue_system.run_cycle()
-            actions_routed = cycle_result.get("actions_routed", 0)
+        from revenue.token_metrics import assess
 
-        saved_missions = await self.db.missions.count_documents({"status": "active"})
+        settings = await self.db.settings.find_one({}) or {}
+
+        # Reference price is the oldest stored measurement in the window, so a
+        # drop is measured against something real rather than a guess.
+        try:
+            oldest = await self.db.token_measurements.find(
+                {"price_usd": {"$ne": None}}
+            ).sort("ts", 1).limit(1).to_list(1)
+            if oldest:
+                settings = {**settings, "_reference_price": oldest[0].get("price_usd")}
+        except Exception:
+            pass
+
+        result = assess(measurement.get("metrics") or {}, settings)
 
         return {
             "phase": "mission",
-            "actions_routed": actions_routed,
-            "saved_missions_active": saved_missions,
+            "assessed": True,
+            "observations": result["observations"],
+            "alert_count": result["alert_count"],
+            # Saved Mission Builder configs remain unwired; this phase assesses
+            # token state, it does not run those.
             "saved_missions_executed": 0,
-            "execution_status": "not_wired",
-            "note": (
-                f"{saved_missions} mission(s) marked active but none are executed. "
-                "Mission Builder configs are not connected to any execution path."
-            ),
             "revenue_generated": 0.0,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    async def phase_scale(self) -> Dict[str, Any]:
-        """SCALE: Scale successful operations."""
-        scaled_operations = []
+    async def phase_scale(self, measurement: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """SCALE: measure change against the previous stored measurement.
 
-        # Check channel scores
-        if hasattr(self.revenue_system, 'memory'):
-            products_score = await self.revenue_system.memory.channel_score("products")
-            agency_score = await self.revenue_system.memory.channel_score("agency")
-            trading_score = await self.revenue_system.memory.channel_score("trading")
+        This is where growth becomes visible: holders, price, treasury balance,
+        traded volume. Deltas are computed only where both sides are real numbers,
+        so a field that was unavailable last cycle produces no delta rather than a
+        fabricated zero.
+        """
+        if not measurement or not measurement.get("measured"):
+            return {
+                "phase": "scale",
+                "compared": False,
+                "reason": "nothing measured this cycle",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
-            # Scale channels with positive ROI
-            if products_score.get("net_usd", 0) > 0:
-                scaled_operations.append({
-                    "channel": "products",
-                    "action": "increase_marketing",
-                    "reason": f"Positive ROI: ${products_score['net_usd']:.2f}"
-                })
+        from revenue.token_metrics import compare
 
-            if agency_score.get("net_usd", 0) > 0:
-                scaled_operations.append({
-                    "channel": "agency",
-                    "action": "expand_outreach",
-                    "reason": f"Positive ROI: ${agency_score['net_usd']:.2f}"
-                })
+        previous = None
+        try:
+            # Skip the row ESKY just wrote; compare against the one before it.
+            rows = await self.db.token_measurements.find({}).sort("ts", -1).limit(2).to_list(2)
+            if len(rows) > 1:
+                previous = rows[1]
+        except Exception as e:
+            logger.warning(f"{self.agent_id}: could not load previous measurement: {e}")
+
+        result = compare(previous, measurement.get("metrics") or {})
 
         return {
             "phase": "scale",
-            "operations_scaled": len(scaled_operations),
-            "scaled": scaled_operations,
+            "compared": not result.get("first_measurement", False),
+            "changes": result.get("changes", {}),
+            "change_count": len(result.get("changes", {})),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    async def phase_withdraw(self) -> Dict[str, Any]:
-        """WITHDRAW: Process withdrawals and payouts."""
+    async def phase_withdraw(self, measurement: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """WITHDRAW: propose a payout only against reconciled income.
+
+        real_income() counts PAYMENT_PROCESSOR entries only, so a token price
+        rise or a treasury balance cannot trigger this. A position is not a
+        profit. Anything proposed still requires a human signature and an
+        allowlisted destination.
+        """
         withdrawal_amount = 0.0
         withdrawal_success = False
 
