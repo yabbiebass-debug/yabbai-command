@@ -792,6 +792,100 @@ async def ai_ask(request: Request, user: dict = Depends(require_director)):
     }
 
 
+@api_router.get("/wallets")
+async def get_wallets(user: dict = Depends(require_director)):
+    """Live SOL and token balances for every configured wallet.
+
+    Reads whatever addresses are configured, in one pass, from chain. There is no
+    MetaMask entry: MetaMask is an Ethereum wallet and holds no SOL or SPL
+    tokens, so labelling a Solana address as one would be wrong on the page. Any
+    Solana address can be added under `extra_wallets` and it is read the same way.
+
+    Read-only. This holds no keys and cannot move anything; spending still
+    requires the operator's own wallet to sign, to an allowlisted destination.
+    """
+    settings = await db.settings.find_one({}) or {}
+    mint = await _configured_mint()
+
+    wallets = []
+    treasury = await _configured_treasury()
+    if treasury:
+        wallets.append({"label": "Treasury", "address": treasury, "role": "treasury"})
+
+    main = (os.environ.get("MAIN_WALLET") or settings.get("main_wallet") or "").strip()
+    if main and is_valid_base58(main):
+        wallets.append({"label": "Main", "address": main, "role": "main"})
+
+    # Comma-separated "Label:Address" pairs, or bare addresses.
+    for entry in (os.environ.get("EXTRA_WALLETS") or settings.get("extra_wallets") or "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        label, _, addr = entry.rpartition(":")
+        addr = addr.strip()
+        if is_valid_base58(addr):
+            wallets.append({
+                "label": (label.strip() or addr[:4] + "..." + addr[-4:]),
+                "address": addr,
+                "role": "extra",
+            })
+
+    if not wallets:
+        return {
+            "ok": True,
+            "wallets": [],
+            "detail": "No wallets configured. Set treasury_wallet or main_wallet "
+                      "in Settings, or EXTRA_WALLETS as Label:Address pairs.",
+        }
+
+    chain = SolanaLive(SOLANA_RPC, fallbacks=SOLANA_FALLBACKS)
+    price = await live_jupiter_price(mint, os.environ.get("JUPITER_API_KEY", "")) if mint else None
+
+    states = await asyncio.gather(
+        *[chain.treasury_state(w["address"], mint) for w in wallets],
+        return_exceptions=True,
+    )
+
+    out = []
+    for w, state in zip(wallets, states):
+        if isinstance(state, Exception):
+            out.append({**w, "sol": None, "token_balance": None,
+                        "error": str(state)[:120]})
+            continue
+        token_balance = state.get("token_balance")
+        out.append({
+            **w,
+            "sol": state.get("sol"),
+            "token_balance": token_balance,
+            "token_value_usd": token_balance * price
+            if price is not None and token_balance is not None else None,
+            "explorer": f"https://solscan.io/account/{w['address']}",
+        })
+
+    total_sol = sum(w["sol"] for w in out if isinstance(w.get("sol"), (int, float)))
+    total_tokens = sum(
+        w["token_balance"] for w in out
+        if isinstance(w.get("token_balance"), (int, float))
+    )
+
+    return {
+        "ok": True,
+        "mint": mint,
+        "price_usd": price,
+        "wallets": out,
+        "totals": {
+            "sol": round(total_sol, 9),
+            "token_balance": total_tokens,
+            "token_value_usd": total_tokens * price if price is not None else None,
+            # Only wallets that answered are summed; a failed read is excluded
+            # rather than counted as zero.
+            "wallets_read": sum(1 for w in out if w.get("sol") is not None),
+            "wallets_total": len(out),
+        },
+        "fetched_at": utcnow(),
+    }
+
+
 @api_router.get("/yield")
 async def get_yield(window_days: int = Query(30, ge=1, le=365),
                     user: dict = Depends(require_director)):
