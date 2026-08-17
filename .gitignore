@@ -1,5 +1,14 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# Database backups from scripts/backup_db.py.
+#
+# Never commit these. They are a full dump of operational state — treasury
+# balances, every recorded observation, settings — and git keeps deleted content
+# forever, so one accidental commit puts the whole history in the repo
+# permanently even after a later removal. Back up to disk or object storage,
+# not to version control.
+backups/
+
 # IDE and editors
 .idea/
 .vscode/
