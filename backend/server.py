@@ -912,12 +912,37 @@ async def buyback_quote(request: Request, user: dict = Depends(require_director)
     state = await chain.treasury_state(treasury_addr, mint)
     treasury_sol = state.get("sol")
 
-    # Default to spending most of what is spendable, leaving the fee reserve.
+    # Default to the size the agents would propose, not to everything spendable.
+    # This box sits under a one-click buy button; defaulting to the whole
+    # treasury made an all-in the path of least resistance. Spending the maximum
+    # is still available, but it has to be typed.
     from buyback import FEE_RESERVE_SOL
+    from revenue.buyback_engine import size_buy
+
+    spendable = max(0.0, (treasury_sol or 0.0) - FEE_RESERVE_SOL)
+    suggested = size_buy(
+        spendable,
+        int(settings.get("risk_appetite") or 0),
+        int(settings.get("reinvest_rate") or 0),
+    )
+
     requested = body.get("amount_sol")
     if requested is None:
-        requested = max(0.0, (treasury_sol or 0.0) - FEE_RESERVE_SOL)
+        requested = suggested
     amount_sol = float(requested)
+
+    if amount_sol <= 0:
+        return {
+            "ok": True, "mint": mint, "treasury": treasury_addr,
+            "available": False,
+            "max_spendable_sol": round(spendable, 6),
+            "suggested_amount_sol": suggested,
+            "reason": (
+                "Risk appetite and reinvestment rate are at zero, so the suggested "
+                f"size is zero. Up to {spendable:.4f} SOL is spendable — enter an "
+                "amount to quote it."
+            ),
+        }
 
     supply = await chain.token_supply(mint)
     decimals = (supply or {}).get("decimals", 6)
@@ -938,7 +963,12 @@ async def buyback_quote(request: Request, user: dict = Depends(require_director)
             f"https://jup.ag/swap/{SOL_MINT}-{mint}"
             f"?inAmount={amount_sol}&slippageBps={slippage_bps}"
         )
-    return {"ok": True, "mint": mint, "treasury": treasury_addr, **result}
+    return {
+        "ok": True, "mint": mint, "treasury": treasury_addr,
+        "max_spendable_sol": round(spendable, 6),
+        "suggested_amount_sol": suggested,
+        **result,
+    }
 
 
 @api_router.post("/buyback/transaction")

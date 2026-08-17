@@ -57,7 +57,9 @@ export default function BuybackPanel({ api }) {
     setBusy(null);
   }, [api]);
 
-  // Prefill with the spendable balance so the first quote is meaningful.
+  // Prefill with the size the agents would propose — not the whole treasury.
+  // This box sits under a one-click buy button, so the default must be a
+  // reasonable trade rather than an all-in.
   useEffect(() => {
     let cancelled = false;
     fetch(`${api}/buyback/quote`, {
@@ -177,6 +179,12 @@ export default function BuybackPanel({ api }) {
 
   const pending = queue?.pending || [];
   const executed = queue?.executed || [];
+
+  const maxSpendable = quote?.max_spendable_sol;
+  const suggested = quote?.suggested_amount_sol;
+  const typed = parseFloat(amount);
+  // Warn when the entered amount is effectively the whole treasury.
+  const isMax = maxSpendable != null && typed > 0 && typed >= maxSpendable * 0.995;
 
   return (
     <div className="card">
@@ -300,7 +308,7 @@ export default function BuybackPanel({ api }) {
       )}
 
       <span className="stat-label">MANUAL BUY</span>
-      <div style={{ display: 'flex', gap: 8, margin: '10px 0 12px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, margin: '10px 0 8px', flexWrap: 'wrap' }}>
         <input
           className="field"
           value={amount}
@@ -319,6 +327,32 @@ export default function BuybackPanel({ api }) {
           {busy === 'quote' ? 'Quoting…' : 'Quote'}
         </button>
       </div>
+
+      {maxSpendable != null && (
+        <div style={{ fontSize: 11, color: '#8fa3bf', marginBottom: 12 }}>
+          {suggested != null && (
+            <>
+              suggested {fmt(suggested, 4)} SOL from your risk and reinvest
+              settings ·{' '}
+            </>
+          )}
+          {fmt(maxSpendable, 4)} SOL spendable{' '}
+          <button
+            onClick={() => { setAmount(String(maxSpendable)); loadQuote(maxSpendable); }}
+            style={{
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              font: 'inherit', color: '#F5A623', textDecoration: 'underline',
+            }}
+          >
+            use all
+          </button>
+          {isMax && (
+            <span style={{ color: '#F5A623' }}>
+              {' '}— this spends the whole treasury except the fee reserve
+            </span>
+          )}
+        </div>
+      )}
 
       {quote?.available && (
         <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
@@ -386,13 +420,18 @@ export default function BuybackPanel({ api }) {
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button
-          className="btn btn-green"
-          style={{ flex: 1, minWidth: 160 }}
+          className={isMax ? 'btn btn-outline' : 'btn btn-green'}
+          style={{
+            flex: 1, minWidth: 160,
+            ...(isMax ? { borderColor: '#F5A623', color: '#F5A623' } : {}),
+          }}
           onClick={execute}
           disabled={busy === 'execute' || !quote?.available}
         >
           {busy === 'execute' ? 'Awaiting wallet…'
-            : wallet ? `Buy with ${wallet.name}` : 'Connect & buy'}
+            : isMax ? `Spend all ${fmt(typed, 4)} SOL`
+            : wallet ? `Buy ${fmt(typed, 4)} SOL with ${wallet.name}`
+            : `Connect & buy ${fmt(typed, 4)} SOL`}
         </button>
         {quote?.jupiter_url && (
           <a className="btn btn-outline" href={quote.jupiter_url}
