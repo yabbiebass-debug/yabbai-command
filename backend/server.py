@@ -6,7 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-import os, logging, httpx, re, asyncio, time, secrets
+import os, logging, httpx, re, asyncio, time, secrets, uuid
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional, List, Any, Dict
@@ -107,6 +107,10 @@ BALANCE_CACHE: Dict[str, Any] = {} # owner -> {data, ts}
 PRICE_TTL = 30   # seconds
 BALANCE_TTL = 15  # seconds
 
+# A queued buyback carries a quote, and a quote goes stale. Past this age the
+# proposal is expired rather than left as a button priced hours ago.
+BUYBACK_PROPOSAL_TTL_HOURS = float(os.environ.get("BUYBACK_PROPOSAL_TTL_HOURS", "6"))
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 # WITHDRAWAL WHITELIST - Only these addresses can receive funds from the platform
@@ -180,6 +184,12 @@ class SettingsBody(BaseModel):
     alert_balance_low_sol: Optional[float] = 0.5
     custom_rpc_enabled: Optional[bool] = False
     demo_mode: Optional[bool] = False
+    # Agents queue buyback proposals only when this is explicitly true. Every
+    # proposal still requires the operator's wallet to sign; no server key exists.
+    buyback_enabled: Optional[bool] = False
+    # Price fall against the earliest recorded observation that triggers a
+    # proposal. Without it the engine sizes on the risk sliders alone.
+    buyback_drop_pct: Optional[float] = 15.0
 
 class MissionBody(BaseModel):
     name: str
@@ -393,7 +403,11 @@ async def add_event(body: EventBody, user: dict = Depends(require_director)):
 
 @api_router.get("/jupiter-price")
 @limiter.limit("60/minute")
-async def get_jupiter_price(request: Request, mint: str):
+async def get_jupiter_price(request: Request, mint: str,
+                            user: dict = Depends(require_director)):
+    """Price for an arbitrary mint. Director-only: the public page reads
+    /public/token instead, and left open this is a free proxy onto a metered
+    Jupiter key."""
     if not mint or not is_valid_base58(mint):
         return {"ok": False, "price": None, "error": "Invalid mint address"}
     # Check cache
@@ -433,7 +447,10 @@ async def get_jupiter_price(request: Request, mint: str):
 
 @api_router.get("/solana-balance")
 @limiter.limit("30/minute")
-async def get_solana_balance(request: Request, owner: str):
+async def get_solana_balance(request: Request, owner: str,
+                             user: dict = Depends(require_director)):
+    """Balances for an arbitrary owner. Director-only for the same reason as
+    the price proxy: it spends the configured RPC quota on any caller's behalf."""
     if not owner or not is_valid_base58(owner):
         return {"ok": False, "error": "Invalid owner address"}
     cached = BALANCE_CACHE.get(owner)
@@ -965,25 +982,96 @@ async def buyback_transaction(request: Request, user: dict = Depends(require_dir
 
     # Record the intent. A proposal that is never signed leaves a trail showing
     # what was considered, which matters when reconciling treasury movement.
-    await db.buyback_proposals.insert_one({
-        "wallet": wallet,
-        "mint": mint,
-        "amount_sol": amount_sol,
-        "slippage_bps": slippage_bps,
-        "price_impact_pct": q["price_impact_pct"],
-        "quoted_out_raw": q["out_amount_raw"],
-        "proposed_by": (user or {}).get("email"),
-        "proposed_at": utcnow(),
-        "executed": False,
-    })
+    # An agent proposal being approved carries its own id through, so approving
+    # it settles that proposal rather than opening a second one beside it.
+    proposal_id = (body.get("proposal_id") or "").strip() or str(uuid.uuid4())
+    await db.buyback_proposals.update_one(
+        {"id": proposal_id},
+        {"$set": {
+            "wallet": wallet,
+            "mint": mint,
+            "amount_sol": amount_sol,
+            "slippage_bps": slippage_bps,
+            "price_impact_pct": q["price_impact_pct"],
+            "quoted_out_raw": q["out_amount_raw"],
+            "built_by": (user or {}).get("email"),
+            "built_at": utcnow(),
+        },
+         "$setOnInsert": {
+            "id": proposal_id,
+            "proposed_by": (user or {}).get("email"),
+            "proposed_at": utcnow(),
+            "status": "pending",
+            "executed": False,
+            "requires_signature": True,
+        }},
+        upsert=True,
+    )
 
     return {
         "ok": True,
         "mint": mint,
+        "proposal_id": proposal_id,
         "amount_sol": amount_sol,
         "price_impact_pct": round(q["price_impact_pct"], 4),
         **built,
     }
+
+
+@api_router.get("/buyback/proposals")
+async def buyback_proposals(user: dict = Depends(require_director)):
+    """Buybacks the agents have queued, awaiting the operator's signature.
+
+    The agents decide and size these; none of them can execute. Each still
+    requires the operator to approve it in their own wallet.
+    """
+    # A proposal carries a quote, and a quote goes stale. Expire old ones rather
+    # than leaving buttons that would execute against hours-old pricing.
+    cutoff = utcnow() - timedelta(hours=BUYBACK_PROPOSAL_TTL_HOURS)
+    await db.buyback_proposals.update_many(
+        {"status": "pending", "executed": False, "proposed_at": {"$lt": cutoff}},
+        {"$set": {"status": "expired"}},
+    )
+
+    pending = await db.buyback_proposals.find(
+        {"status": "pending", "executed": False}, {"_id": 0}
+    ).sort("proposed_at", -1).to_list(20)
+
+    recent = await db.buyback_proposals.find(
+        {"executed": True}, {"_id": 0}
+    ).sort("proposed_at", -1).to_list(10)
+
+    settings = await db.settings.find_one({}) or {}
+    return {
+        "ok": True,
+        "pending": pending,
+        "executed": recent,
+        "enabled": settings.get("buyback_enabled") is True,
+        "proposal_ttl_hours": BUYBACK_PROPOSAL_TTL_HOURS,
+        "note": (
+            "Agents propose; they cannot execute. Every buyback requires the "
+            "operator's wallet to sign, so no server-side key exists that could "
+            "spend the treasury. Approving re-quotes at current pricing before "
+            "your wallet is asked to sign."
+        ),
+    }
+
+
+@api_router.post("/buyback/proposals/dismiss")
+async def buyback_dismiss(request: Request, user: dict = Depends(require_director)):
+    """Dismiss a queued proposal without executing it."""
+    body = await request.json()
+    proposal_id = (body.get("id") or "").strip()
+    if not proposal_id:
+        raise HTTPException(400, "id is required")
+    result = await db.buyback_proposals.update_one(
+        {"id": proposal_id, "executed": False},
+        {"$set": {"status": "dismissed", "dismissed_by": (user or {}).get("email"),
+                  "dismissed_at": utcnow()}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "no pending proposal with that id")
+    return {"ok": True, "id": proposal_id}
 
 
 @api_router.post("/buyback/confirm")
@@ -1012,11 +1100,22 @@ async def buyback_confirm(request: Request, user: dict = Depends(require_directo
         "explorer": f"https://solscan.io/tx/{signature}",
     }
     await db.transactions.insert_one(doc)
-    await db.buyback_proposals.update_one(
-        {"wallet": doc["wallet"], "executed": False},
-        {"$set": {"executed": True, "signature": signature}},
-        sort=[("proposed_at", -1)],
-    )
+
+    # Settle the proposal this signature belongs to. Matching by id is exact;
+    # without one, fall back to the newest unexecuted proposal for the wallet.
+    settled = {"$set": {"executed": True, "status": "executed",
+                        "signature": signature, "executed_at": utcnow()}}
+    proposal_id = (body.get("proposal_id") or "").strip()
+    if proposal_id:
+        await db.buyback_proposals.update_one({"id": proposal_id}, settled)
+    elif doc["wallet"]:
+        # find_one_and_update sorts; update_one on pymongo 4.5 does not.
+        await db.buyback_proposals.find_one_and_update(
+            {"wallet": doc["wallet"], "executed": False},
+            settled,
+            sort=[("proposed_at", -1)],
+        )
+
     logger.info(f"buyback recorded: {signature[:16]}...")
     return {"ok": True, "signature": signature, "explorer": doc["explorer"]}
 
@@ -1351,8 +1450,13 @@ async def log_sweep(request: Request, user: dict = Depends(require_director)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/sweep/validate-destination")
-async def validate_sweep_destination(address: str = Query(...)):
-    """Validate if an address is authorized for withdrawals."""
+async def validate_sweep_destination(address: str = Query(...),
+                                     user: dict = Depends(require_director)):
+    """Validate if an address is authorized for withdrawals.
+
+    Director-only: this answers whether a given address is on the withdrawal
+    allowlist, which is not something an anonymous caller needs to learn.
+    """
     is_authorized = is_authorized_withdrawal_address(address)
     return {
         "authorized": is_authorized,
@@ -1622,12 +1726,18 @@ async def revenue_webhook_invoice_paid(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.post("/revenue/webhooks/sweep-attempted")
+@limiter.limit("60/minute")
 async def revenue_webhook_sweep_attempted(request: Request):
-    """Track sweep attempt (for audit trail)."""
+    """Record a sweep attempt in the audit trail. Signature required.
+
+    This was open, which made the sweep log writable by anyone who guessed the
+    URL. An audit trail that accepts forged entries is worse than none, because
+    a real sweep can then be buried under noise — and reconstructing exactly
+    that trail is the reason this endpoint exists. Same HMAC as the income
+    webhooks; fails closed.
+    """
+    data = await _verified_webhook_body(request, "sweep")
     try:
-        data = await request.json()
-        
-        # Log sweep attempt
         await db.revenue_sweeps.insert_one({
             "from": data.get("from"),
             "to": data.get("to"),
@@ -1636,9 +1746,9 @@ async def revenue_webhook_sweep_attempted(request: Request):
             "status": "attempted",
             "timestamp": datetime.now(timezone.utc),
         })
-        
-        logger.info(f"💰 Sweep attempted: {data.get('amount')} {data.get('token')} → {data.get('to')}")
-        
+
+        logger.info(f"sweep attempted: {data.get('amount')} {data.get('token')} -> {data.get('to')}")
+
         return {"ok": True, "tracked": True}
     except Exception as e:
         logger.error(f"Sweep tracking error: {e}")
@@ -1814,8 +1924,8 @@ async def agents_spawn_phase(
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/agents/phase/{phase}")
-async def agents_phase_status(phase: str):
-    """Get status for a specific phase."""
+async def agents_phase_status(phase: str, user: dict = Depends(require_director)):
+    """Get status for a specific phase. Director-only: agent internals."""
     try:
         from revenue.agents import Phase
         phase_enum = Phase(phase.lower())
@@ -1858,8 +1968,8 @@ async def get_achievements(
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/achievements/summary")
-async def get_achievements_summary():
-    """Get achievement statistics and summary."""
+async def get_achievements_summary(user: dict = Depends(require_director)):
+    """Get achievement statistics and summary. Director-only, as /achievements is."""
     try:
         summary = await achievement_tracker.get_summary()
         return {
@@ -1871,8 +1981,9 @@ async def get_achievements_summary():
         raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/achievements/agent/{agent_id}")
-async def get_agent_achievements(agent_id: str, limit: int = Query(20, le=100)):
-    """Get achievements for a specific agent."""
+async def get_agent_achievements(agent_id: str, limit: int = Query(20, le=100),
+                                 user: dict = Depends(require_director)):
+    """Get achievements for a specific agent. Director-only, as /achievements is."""
     try:
         achievements = await achievement_tracker.get_by_agent(agent_id, limit=limit)
         return {
