@@ -84,6 +84,68 @@ async def quote(
     }
 
 
+SWAP_URL = "https://lite-api.jup.ag/swap/v1/swap"
+
+
+async def build_transaction(
+    quote_raw: Dict[str, Any],
+    user_public_key: str,
+    api_key: str = "",
+) -> Optional[Dict[str, Any]]:
+    """Ask Jupiter to build the swap transaction for a given quote.
+
+    Returns an unsigned, serialised transaction. It is useless without a
+    signature, and the only thing that can sign it is the wallet holding that
+    public key. This service never sees a key and cannot sign, so a transaction
+    returned here cannot execute unless the operator approves it in their own
+    wallet, where the amounts are displayed before they accept.
+    """
+    payload = {
+        "quoteResponse": quote_raw,
+        "userPublicKey": user_public_key,
+        "wrapAndUnwrapSol": True,
+        # Priority fee sized automatically; a swap that never lands is worse
+        # than one that costs a fraction more to confirm.
+        "dynamicComputeUnitLimit": True,
+        "prioritizationFeeLamports": "auto",
+    }
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if api_key:
+        headers["x-api-key"] = api_key
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(SWAP_URL, json=payload, headers=headers)
+    except Exception as e:
+        logger.warning(f"swap build unreachable: {e}")
+        return None
+
+    if resp.status_code != 200:
+        logger.warning(f"swap build HTTP {resp.status_code}: {resp.text[:200]}")
+        return None
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        logger.warning(f"swap build bad JSON: {e}")
+        return None
+
+    tx = data.get("swapTransaction")
+    if not tx:
+        return None
+
+    return {
+        "swap_transaction": tx,
+        "last_valid_block_height": data.get("lastValidBlockHeight"),
+        "priority_fee_lamports": data.get("prioritizationFeeLamports"),
+        "signed": False,
+        "note": (
+            "Unsigned. Requires the operator's wallet to sign. This service holds "
+            "no keys and cannot sign or submit it."
+        ),
+    }
+
+
 def plan(
     treasury_sol: Optional[float],
     quote_result: Optional[Dict[str, Any]],

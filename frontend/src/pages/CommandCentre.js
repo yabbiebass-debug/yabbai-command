@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useToast } from '../context/ToastContext';
 import WalletPanel from '../components/WalletPanel';
+import BuybackPanel from '../components/BuybackPanel';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -337,6 +338,13 @@ export default function CommandCentre() {
           and signs nothing on its own. */}
       <div className="fade-in-4" style={{ marginBottom: 24 }}>
         <WalletPanel api={API} mint={tokenMint} />
+      </div>
+
+      {/* Buyback: the one lever here that moves market cap with funds already
+          under the operator's control. Quoted by Jupiter, signed by their own
+          wallet, never by this service. */}
+      <div className="fade-in-4" style={{ marginBottom: 24 }}>
+        <BuybackPanel api={API} />
       </div>
 
       {/* Live Events Feed */}

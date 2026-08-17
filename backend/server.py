@@ -924,6 +924,103 @@ async def buyback_quote(request: Request, user: dict = Depends(require_director)
     return {"ok": True, "mint": mint, "treasury": treasury_addr, **result}
 
 
+@api_router.post("/buyback/transaction")
+@limiter.limit("20/minute")
+async def buyback_transaction(request: Request, user: dict = Depends(require_director)):
+    """Build an unsigned swap transaction for the operator's wallet to sign.
+
+    The returned transaction is inert without a signature, and the only key that
+    can sign it belongs to the wallet whose public key was supplied. This service
+    holds no keys, cannot sign, and cannot submit. The operator approves it in
+    their own wallet, which displays the amounts before they accept.
+    """
+    from buyback import quote as bb_quote, build_transaction
+
+    body = await request.json()
+    wallet = (body.get("wallet") or "").strip()
+    amount_sol = float(body.get("amount_sol") or 0)
+
+    if not wallet or not is_valid_base58(wallet):
+        raise HTTPException(400, "a valid wallet public key is required")
+    if amount_sol <= 0:
+        raise HTTPException(400, "amount_sol must be greater than zero")
+
+    mint = await _configured_mint()
+    if not mint:
+        raise HTTPException(400, "no token mint configured")
+
+    settings = await db.settings.find_one({}) or {}
+    slippage_bps = int(body.get("slippage_bps") or settings.get("slippage_bps") or 50)
+    api_key = os.environ.get("JUPITER_API_KEY", "")
+
+    q = await bb_quote(mint, amount_sol, slippage_bps, api_key)
+    if not q:
+        raise HTTPException(
+            502, "no route quoted; the pool may be too thin for this size"
+        )
+
+    built = await build_transaction(q["raw"], wallet, api_key)
+    if not built:
+        raise HTTPException(502, "Jupiter could not build the transaction")
+
+    # Record the intent. A proposal that is never signed leaves a trail showing
+    # what was considered, which matters when reconciling treasury movement.
+    await db.buyback_proposals.insert_one({
+        "wallet": wallet,
+        "mint": mint,
+        "amount_sol": amount_sol,
+        "slippage_bps": slippage_bps,
+        "price_impact_pct": q["price_impact_pct"],
+        "quoted_out_raw": q["out_amount_raw"],
+        "proposed_by": (user or {}).get("email"),
+        "proposed_at": utcnow(),
+        "executed": False,
+    })
+
+    return {
+        "ok": True,
+        "mint": mint,
+        "amount_sol": amount_sol,
+        "price_impact_pct": round(q["price_impact_pct"], 4),
+        **built,
+    }
+
+
+@api_router.post("/buyback/confirm")
+@limiter.limit("20/minute")
+async def buyback_confirm(request: Request, user: dict = Depends(require_director)):
+    """Record a buyback the operator signed and submitted.
+
+    The signature is the operator's proof it happened; this only records it so
+    treasury movement can be reconciled later. It books no income: buying your
+    own token converts SOL into tokens, which is a change of position, not
+    revenue.
+    """
+    body = await request.json()
+    signature = (body.get("signature") or "").strip()
+    if not signature:
+        raise HTTPException(400, "transaction signature is required")
+
+    doc = {
+        "type": "buyback",
+        "signature": signature,
+        "wallet": (body.get("wallet") or "").strip() or None,
+        "amount_sol": body.get("amount_sol"),
+        "tokens_out": body.get("tokens_out"),
+        "confirmed_by": (user or {}).get("email"),
+        "created_at": utcnow(),
+        "explorer": f"https://solscan.io/tx/{signature}",
+    }
+    await db.transactions.insert_one(doc)
+    await db.buyback_proposals.update_one(
+        {"wallet": doc["wallet"], "executed": False},
+        {"$set": {"executed": True, "signature": signature}},
+        sort=[("proposed_at", -1)],
+    )
+    logger.info(f"buyback recorded: {signature[:16]}...")
+    return {"ok": True, "signature": signature, "explorer": doc["explorer"]}
+
+
 @api_router.get("/wallets")
 async def get_wallets(user: dict = Depends(require_director)):
     """Live SOL and token balances for every configured wallet.

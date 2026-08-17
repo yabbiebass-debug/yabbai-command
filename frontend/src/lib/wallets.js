@@ -162,6 +162,79 @@ export async function signMessage(entry, message) {
   return toBase64(sig);
 }
 
+/**
+ * Sign and submit a Jupiter-built swap transaction.
+ *
+ * The transaction arrives unsigned from the server and is inert until this
+ * wallet signs it. The wallet displays the amounts and the counterparty before
+ * the user accepts — that prompt, not this code, is the thing protecting them.
+ * Read it before approving.
+ *
+ * Prefers signAndSendTransaction so the wallet submits through its own RPC,
+ * which usually lands more reliably and, for Jupiter Wallet, keeps its MEV
+ * protection in the path.
+ */
+export async function signAndSendTransaction(entry, base64Tx) {
+  const raw = Uint8Array.from(window.atob(base64Tx), (c) => c.charCodeAt(0));
+
+  if (entry?.standard) {
+    const features = entry.standard.features || {};
+    const account = entry.standard.accounts?.[0];
+    if (!account) throw new Error(`${entry.name} is not connected`);
+
+    const sendFeature = features['solana:signAndSendTransaction'];
+    if (sendFeature?.signAndSendTransaction) {
+      const [res] = await sendFeature.signAndSendTransaction({
+        account,
+        transaction: raw,
+        chain: 'solana:mainnet',
+      });
+      if (!res?.signature) throw new Error('wallet returned no signature');
+      return bs58FromBytes(res.signature);
+    }
+    throw new Error(
+      `${entry.name} cannot submit transactions from this page. Use the Jupiter link instead.`
+    );
+  }
+
+  const provider = entry?.provider;
+  if (provider?.signAndSendTransaction) {
+    // Legacy providers expect a Transaction object; hand them the bytes and let
+    // the extension deserialise, which Phantom and Solflare both support.
+    const res = await provider.signAndSendTransaction(raw);
+    const sig = res?.signature || res;
+    if (!sig) throw new Error('wallet returned no signature');
+    return typeof sig === 'string' ? sig : bs58FromBytes(sig);
+  }
+
+  throw new Error(
+    `${entry?.name || 'wallet'} cannot submit transactions. Use the Jupiter link instead.`
+  );
+}
+
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+function bs58FromBytes(bytes) {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let digits = [0];
+  for (let i = 0; i < arr.length; i += 1) {
+    let carry = arr[i];
+    for (let j = 0; j < digits.length; j += 1) {
+      carry += digits[j] << 8;
+      digits[j] = carry % 58;
+      carry = (carry / 58) | 0;
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = (carry / 58) | 0;
+    }
+  }
+  let out = '';
+  for (let i = 0; arr[i] === 0 && i < arr.length - 1; i += 1) out += '1';
+  for (let i = digits.length - 1; i >= 0; i -= 1) out += B58[digits[i]];
+  return out;
+}
+
 function toBase64(bytes) {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   let binary = '';
