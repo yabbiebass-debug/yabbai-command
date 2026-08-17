@@ -184,10 +184,16 @@ export async function signAndSendTransaction(entry, base64Tx) {
 
     const sendFeature = features['solana:signAndSendTransaction'];
     if (sendFeature?.signAndSendTransaction) {
+      // The Wallet Standard takes the serialised bytes directly. Send the chain
+      // the wallet itself reports: some say solana:mainnet, others mainnet-beta,
+      // and a mismatch is rejected.
+      const chain =
+        (entry.standard.chains || []).find((c) => SOLANA_CHAINS.includes(c)) ||
+        'solana:mainnet';
       const [res] = await sendFeature.signAndSendTransaction({
         account,
         transaction: raw,
-        chain: 'solana:mainnet',
+        chain,
       });
       if (!res?.signature) throw new Error('wallet returned no signature');
       return bs58FromBytes(res.signature);
@@ -199,9 +205,12 @@ export async function signAndSendTransaction(entry, base64Tx) {
 
   const provider = entry?.provider;
   if (provider?.signAndSendTransaction) {
-    // Legacy providers expect a Transaction object; hand them the bytes and let
-    // the extension deserialise, which Phantom and Solflare both support.
-    const res = await provider.signAndSendTransaction(raw);
+    // Injected providers take a web3.js transaction object, not bytes — they
+    // call .serialize() on whatever they are given, so bytes fail with
+    // "serialize is not a function". Jupiter builds versioned transactions;
+    // fall back to the legacy format for anything that is not.
+    const tx = await deserializeTransaction(raw);
+    const res = await provider.signAndSendTransaction(tx);
     const sig = res?.signature || res;
     if (!sig) throw new Error('wallet returned no signature');
     return typeof sig === 'string' ? sig : bs58FromBytes(sig);
@@ -210,6 +219,21 @@ export async function signAndSendTransaction(entry, base64Tx) {
   throw new Error(
     `${entry?.name || 'wallet'} cannot submit transactions. Use the Jupiter link instead.`
   );
+}
+
+/**
+ * Bytes to a web3.js transaction object.
+ *
+ * Imported dynamically so web3.js stays out of the public holders bundle, which
+ * has no signing path and must not carry one.
+ */
+async function deserializeTransaction(raw) {
+  const web3 = await import('@solana/web3.js');
+  try {
+    return web3.VersionedTransaction.deserialize(raw);
+  } catch {
+    return web3.Transaction.from(raw);
+  }
 }
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
