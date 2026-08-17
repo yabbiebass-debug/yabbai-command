@@ -85,6 +85,10 @@ api_router = APIRouter(prefix="/api")
 
 SOLANA_RPC = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 
+# Wrapped SOL, used to price the SOL side of the treasury so a token holding can
+# be expressed in SOL without mixing units.
+SOL_MINT = "So11111111111111111111111111111111111111112"
+
 # Fallback endpoints, tried when the primary refuses a method on plan grounds.
 # Chainstack's shared tier declines getProgramAccounts, getTokenLargestAccounts and
 # getTokenAccountsByOwner, which blanks holder count, concentration and treasury
@@ -1073,16 +1077,41 @@ async def record_live_snapshot() -> Dict[str, Any]:
             await _prune_collection(db.price_history, {"mint": mint})
             written["price"] = True
 
-    sol = await chain.sol_balance(treasury_addr)
+    # Read SOL and token holdings together. Recording SOL alone made a swap from
+    # SOL into the project's own token look like a total loss of that SOL, because
+    # performance had no idea the tokens had arrived.
+    state = await chain.treasury_state(treasury_addr, mint) if mint else {}
+    sol = state.get("sol") if mint else await chain.sol_balance(treasury_addr)
     if sol is not None:
-        price_for_usd = PRICE_CACHE.get(mint, {}).get("price") if mint else None
+        token_balance = state.get("token_balance")
+        token_price_usd = await live_jupiter_price(
+            mint, os.environ.get("JUPITER_API_KEY", "")
+        ) if mint else None
+        sol_price_usd = await live_jupiter_price(
+            SOL_MINT, os.environ.get("JUPITER_API_KEY", "")
+        )
+
+        token_value_usd = (
+            token_balance * token_price_usd
+            if token_balance is not None and token_price_usd is not None else None
+        )
+        # Express the token holding in SOL so performance can add the two sides
+        # without mixing units.
+        token_value_sol = (
+            token_value_usd / sol_price_usd
+            if token_value_usd is not None and sol_price_usd else None
+        )
+
         await db.treasury_snapshots.insert_one(
             {
                 "address": treasury_addr,
                 "balance_sol": sol,
-                "balance_usd": sol * price_for_usd if price_for_usd else None,
+                "balance_usd": sol * sol_price_usd if sol_price_usd else None,
+                "token_balance": token_balance,
+                "token_value_usd": token_value_usd,
+                "token_value_sol": token_value_sol,
                 "ts": now,
-                "source": "rpc:getBalance",
+                "source": "rpc:getBalance+getTokenAccountsByOwner",
             }
         )
         await _prune_collection(db.treasury_snapshots, {})

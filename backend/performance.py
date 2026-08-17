@@ -43,16 +43,45 @@ def _parse_ts(value: Any) -> Optional[datetime]:
 
 
 async def treasury_performance(db, window_days: int = 30) -> Dict[str, Any]:
-    """Realised performance over the window, or an explicit reason it is unavailable."""
+    """Realised performance over the window, or an explicit reason it is unavailable.
+
+    Measures TOTAL treasury value, not the SOL balance alone. Measuring SOL only
+    reports a 36% loss when the operator converts SOL into the project's own
+    token: the SOL leaves, the tokens arrive, nothing is lost, and yet the figure
+    shows a collapse. A swap is a change of composition, not of value, so both
+    sides have to be counted or the number is worse than useless.
+
+    Token value uses the price recorded at the same moment, so a valuation is
+    never mixed across time. Snapshots that predate token tracking fall back to
+    SOL alone and are flagged, rather than being silently treated as zero tokens.
+    """
     since = datetime.now(timezone.utc) - timedelta(days=window_days)
 
     snapshots = await db.treasury_snapshots.find({}).sort("ts", 1).to_list(1000)
     in_window = []
+    sol_only_rows = 0
     for snap in snapshots:
         ts = _parse_ts(snap.get("ts"))
         balance = snap.get("balance_sol")
-        if ts and ts >= since and isinstance(balance, (int, float)):
-            in_window.append({"ts": ts, "balance_sol": float(balance)})
+        if not (ts and ts >= since and isinstance(balance, (int, float))):
+            continue
+
+        sol = float(balance)
+        token_value_sol = snap.get("token_value_sol")
+        if isinstance(token_value_sol, (int, float)):
+            total = sol + float(token_value_sol)
+        else:
+            # Older snapshot with no token data. Counting it as zero tokens would
+            # manufacture a loss the moment token tracking began.
+            total = sol
+            sol_only_rows += 1
+
+        in_window.append({
+            "ts": ts,
+            "balance_sol": sol,
+            "token_value_sol": token_value_sol if isinstance(token_value_sol, (int, float)) else None,
+            "total_value_sol": total,
+        })
 
     if len(in_window) < MIN_SNAPSHOTS:
         return {
@@ -100,10 +129,12 @@ async def treasury_performance(db, window_days: int = 30) -> Dict[str, Any]:
             continue
         flows_counted += 1
 
-    value_change = last["balance_sol"] - first["balance_sol"]
+    # Total value, so converting SOL into the token nets to roughly zero rather
+    # than reading as a loss.
+    value_change = last["total_value_sol"] - first["total_value_sol"]
     performance_sol = value_change - net_flows
 
-    starting = first["balance_sol"]
+    starting = first["total_value_sol"]
     if starting <= 0:
         return {
             "available": False,
@@ -123,8 +154,18 @@ async def treasury_performance(db, window_days: int = 30) -> Dict[str, Any]:
     result: Dict[str, Any] = {
         "available": True,
         "measured": True,
+        "basis": "total treasury value (SOL + token holdings)",
         "starting_balance_sol": round(starting, 6),
-        "ending_balance_sol": round(last["balance_sol"], 6),
+        "ending_balance_sol": round(last["total_value_sol"], 6),
+        "sol_only": {
+            "from": round(first["balance_sol"], 6),
+            "to": round(last["balance_sol"], 6),
+        },
+        "token_value_sol": {
+            "from": first.get("token_value_sol"),
+            "to": last.get("token_value_sol"),
+        },
+        "snapshots_without_token_data": sol_only_rows,
         "value_change_sol": round(value_change, 6),
         "net_flows_sol": round(net_flows, 6),
         "performance_sol": round(performance_sol, 6),
