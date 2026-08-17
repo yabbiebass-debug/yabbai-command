@@ -302,6 +302,71 @@ export default function Holders() {
               </section>
             )}
 
+            {/* Distance to graduation. Until the curve completes there is no
+                liquidity pool and no LP fee share, so this is the number that
+                most determines whether the project goes anywhere. Shown plainly,
+                including when it is barely off zero. */}
+            {stats.graduation?.available && !stats.graduation.graduated && (
+              <section style={{
+                padding: 20, borderRadius: 10, background: 'rgba(10,17,40,0.7)',
+                border: '1px solid rgba(153,69,255,0.25)', marginBottom: 18,
+              }}>
+                <div style={{
+                  fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: 1,
+                  color: '#3a5070', marginBottom: 12,
+                }}>
+                  BONDING CURVE PROGRESS
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
+                  <span style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 900, color: '#9945FF' }}>
+                    {stats.graduation.progress_pct.toFixed(2)}%
+                  </span>
+                  <span style={{ fontSize: 12, color: '#8fa3bf' }}>
+                    of the way to graduation
+                  </span>
+                </div>
+
+                <div style={{
+                  height: 8, borderRadius: 4, background: 'rgba(58,80,112,0.35)',
+                  overflow: 'hidden', marginBottom: 12,
+                }}>
+                  <div style={{
+                    width: `${Math.max(0.5, Math.min(100, stats.graduation.progress_pct))}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, #9945FF, #14F195)',
+                  }} />
+                </div>
+
+                <div style={{
+                  display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 18,
+                }}>
+                  <Stat
+                    label="MARKET CAP"
+                    value={`${stats.graduation.market_cap_sol.toFixed(1)} SOL`}
+                  />
+                  <Stat
+                    label="GRADUATES AT"
+                    value={`${stats.graduation.graduation_mcap_sol.toFixed(0)} SOL`}
+                  />
+                  <Stat
+                    label="REMAINING"
+                    value={`${stats.graduation.remaining_mcap_sol.toFixed(0)} SOL`}
+                  />
+                </div>
+
+                <p style={{ color: '#8fa3bf', fontSize: 12, marginTop: 14, lineHeight: 1.6 }}>
+                  On graduation the token migrates from its launch bonding curve to
+                  a Meteora liquidity pool, at which point real liquidity and a
+                  trading-fee share begin. Roughly{' '}
+                  <strong>${stats.graduation.remaining_mcap_usd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>{' '}
+                  of market cap is still required. No completion date is estimated:
+                  that depends entirely on buying, which no figure on this page can
+                  predict.
+                </p>
+              </section>
+            )}
+
             {/* Traded activity from DexScreener. Fields that a bonding curve has
                 no equivalent for stay as DATA GAP — showing $0 liquidity would
                 claim something false about the token. */}

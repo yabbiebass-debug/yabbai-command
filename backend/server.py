@@ -17,6 +17,7 @@ from achievements import AchievementTracker
 from solana_live import SolanaLive, jupiter_price as live_jupiter_price
 from performance import treasury_performance
 from dexscreener import market as dex_market, gaps as dex_gaps
+from graduation import assess as grad_assess, summary_line as grad_summary
 from revenue.ledger_store import (
     persist as ledger_persist,
     load_all as ledger_load_all,
@@ -704,6 +705,14 @@ async def public_token(request: Request):
         "treasury_address": treasury_addr,
         "treasury_sol": treasury.get("sol"),
         "treasury_token_balance": treasury.get("token_balance"),
+        # Distance to graduation, measured. Until the curve completes there is no
+        # liquidity pool and no LP fee share, so this is the number that matters
+        # most to a holder deciding whether the project is going anywhere.
+        "graduation": grad_assess(
+            market_cap,
+            await live_jupiter_price(SOL_MINT, os.environ.get("JUPITER_API_KEY", "")),
+            (mkt or {}).get("volume_24h_usd"),
+        ),
         # Traded activity. Chain reads cannot supply these; they come from
         # DexScreener. Fields absent while the token is on a bonding curve stay
         # null so the UI shows DATA GAP rather than claiming zero liquidity.
