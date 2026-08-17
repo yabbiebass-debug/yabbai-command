@@ -76,6 +76,23 @@ services:
       - key: WEBHOOK_MAX_AGE_SECONDS
         value: "300"
 
+      # Claim faucet. Off, deliberately, and not merely unset.
+      #
+      # The token is still on its launch bonding curve. Tokens given away get
+      # sold, and selling into a curve pulls SOL back out of it — lowering market
+      # cap and moving graduation further away. Measured 17 Aug: 0.23% of the way,
+      # 998 SOL short, 8 buys and 0 sells so far. A thousand free-token wallets is
+      # a thousand potential first sellers against that.
+      #
+      # Turn on after graduation, when a real pool exists. Stated here rather than
+      # left absent so nobody later assumes it was forgotten.
+      - key: FAUCET_ENABLED
+        value: "false"
+      - key: FAUCET_TOKENS_PER_CLAIM
+        value: "1000"
+      - key: FAUCET_MAX_CLAIMS
+        value: "1000"
+
       # Buyback guards. The defaults are in backend/revenue/buyback_engine.py;
       # set these only to change them. Agents propose within these bounds and
       # cannot execute - every buy is signed by the operator's own wallet.
@@ -131,6 +148,20 @@ services:
       - path: /*
         name: Strict-Transport-Security
         value: max-age=31536000; includeSubDomains
+      # Mirrors the policy in frontend/netlify.toml, which applies only when
+      # hosting on Netlify. Without this block a Render deploy served no CSP at
+      # all, so the two hosts protected the same bundle very differently.
+      #
+      # connect-src lists api.yabbai.network explicitly. CSP host matching has no
+      # implicit subdomain wildcard, so `https://yabbai.network` does NOT cover
+      # `https://api.yabbai.network` — and REACT_APP_BACKEND_URL points at exactly
+      # that. Omitting it blocks every API call the app makes.
+      #
+      # script-src stays 'self' with no 'unsafe-inline': the one inline script
+      # this app had now lives in public/error-shim.js for precisely that reason.
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://yabbai.network https://api.yabbai.network https://api.jup.ag; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'; upgrade-insecure-requests"
 
   # == Public holder view - holders.yabbai.network ==============================
   # build:holders is the entire isolation. Running the default build here would
@@ -166,3 +197,17 @@ services:
       - path: /*
         name: Strict-Transport-Security
         value: max-age=31536000; includeSubDomains
+      # Mirrors the policy in frontend/netlify.toml, which applies only when
+      # hosting on Netlify. Without this block a Render deploy served no CSP at
+      # all, so the two hosts protected the same bundle very differently.
+      #
+      # connect-src lists api.yabbai.network explicitly. CSP host matching has no
+      # implicit subdomain wildcard, so `https://yabbai.network` does NOT cover
+      # `https://api.yabbai.network` — and REACT_APP_BACKEND_URL points at exactly
+      # that. Omitting it blocks every API call the app makes.
+      #
+      # script-src stays 'self' with no 'unsafe-inline': the one inline script
+      # this app had now lives in public/error-shim.js for precisely that reason.
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://yabbai.network https://api.yabbai.network https://api.jup.ag; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'; upgrade-insecure-requests"

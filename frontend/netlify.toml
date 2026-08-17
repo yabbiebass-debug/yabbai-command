@@ -48,7 +48,13 @@
       style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
       font-src 'self' https://fonts.gstatic.com data:;
       img-src 'self' data: https:;
-      connect-src 'self' https://yabbai.network https://api.jup.ag;
+      # api.yabbai.network is listed separately on purpose. CSP host matching has
+      # no implicit subdomain wildcard, so https://yabbai.network does not cover
+      # https://api.yabbai.network — and REACT_APP_BACKEND_URL points at that
+      # exact host. Without this entry the browser blocks every API call the app
+      # makes, and the failure appears as a CSP violation in the console rather
+      # than as a network error, which sends you looking in the wrong place.
+      connect-src 'self' https://yabbai.network https://api.yabbai.network https://api.jup.ag;
       frame-ancestors 'none';
       form-action 'self';
       base-uri 'self';
