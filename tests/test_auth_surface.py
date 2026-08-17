@@ -26,6 +26,24 @@ PUBLIC = {
     ("GET", "/api/"),                       # health check
     ("GET", "/api/public/token"),           # holders page: measured token stats
     ("GET", "/api/public/price-history"),   # holders page: recorded price points
+
+    # ── Faucet ──────────────────────────────────────────────────────────────
+    # These three must be anonymous: the people claiming are strangers with a
+    # wallet and no account, which is the entire point of a faucet.
+    #
+    # The property that makes them safe is that NONE of them can move value.
+    # backend/faucet.py stores signed intent and nothing else — the server holds
+    # no key, and payouts are signed later by the operator's own wallet. The
+    # worst outcome reachable from this surface is a queue full of junk, which
+    # can be truncated. That is a deliberately different failure class from the
+    # one that got this project swept.
+    #
+    # Re-check that claim before widening any of them: the moment a faucet route
+    # can sign, transfer, or authorise, it stops belonging on this list.
+
+    ("GET", "/api/faucet/status"),          # counts and cap; no addresses, no operator state
+    ("POST", "/api/faucet/nonce"),          # anti-replay nonce; public by design, 10/min
+    ("POST", "/api/faucet/claim"),          # ed25519-verified, deduped, capped, 5/min
 }
 
 failures = []

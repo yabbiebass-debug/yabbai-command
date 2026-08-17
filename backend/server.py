@@ -2203,6 +2203,14 @@ async def health_details(request: Request, user: dict = Depends(require_director
 async def root():
     return {"message": "YABBAI API running", "status": "ok", "version": "2.0"}
 
+# Token claim faucet. Mounted onto api_router so it inherits the /api prefix and
+# the CORS/limiter setup. It holds no key and moves nothing — it records signed
+# claims for the operator to pay in a batch. See faucet.py for the reasoning.
+# Imported here rather than at the top because it takes db, require_director and
+# limiter as arguments, all of which are defined above.
+from faucet import build_router as build_faucet_router
+api_router.include_router(build_faucet_router(db, require_director, limiter))
+
 app.include_router(api_router)
 
 # CORS. allow_credentials=True means the session cookie can ride on cross-origin

@@ -15,6 +15,7 @@ import SideHustle from './pages/SideHustle';
 import Promo from './pages/Promo';
 import Settings from './pages/Settings';
 import Analytics from './pages/Analytics';
+import FaucetPayout from './pages/FaucetPayout';
 import './index.css';
 
 function App() {
@@ -36,6 +37,9 @@ function App() {
               <Route path="/promo" element={<Promo />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/analytics" element={<Analytics />} />
+              {/* Director only. This route is inside ProtectedRoute and is never
+                  compiled into the holders build, which has no router at all. */}
+              <Route path="/faucet" element={<FaucetPayout />} />
             </Route>
           </Routes>
         </ProtectedRoute>
