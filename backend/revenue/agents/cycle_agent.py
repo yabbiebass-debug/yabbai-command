@@ -8,6 +8,7 @@ Each agent runs independently, coordinated by the main orchestrator.
 """
 
 import asyncio
+import os
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any
@@ -312,17 +313,101 @@ class CycleAgent:
 
         result = assess(measurement.get("metrics") or {}, settings)
 
+        # Only the agent that actually measured considers a buyback. Otherwise
+        # fifty agents sharing one cached measurement would each queue the same
+        # proposal, and the operator would face fifty identical buttons.
+        buyback = {"propose": False, "reason": "measurement served from cache"}
+        if not measurement.get("cached"):
+            try:
+                buyback = await self._consider_buyback(measurement.get("metrics") or {})
+            except Exception as e:
+                logger.error(f"{self.agent_id}: buyback consideration failed: {e}")
+                buyback = {"propose": False, "reason": f"error: {e}"}
+
         return {
             "phase": "mission",
             "assessed": True,
             "observations": result["observations"],
             "alert_count": result["alert_count"],
+            "buyback": {
+                "proposed": bool(buyback.get("propose")),
+                "reason": buyback.get("reason"),
+                "amount_sol": buyback.get("amount_sol"),
+                "price_impact_pct": buyback.get("price_impact_pct"),
+            },
             # Saved Mission Builder configs remain unwired; this phase assesses
             # token state, it does not run those.
             "saved_missions_executed": 0,
             "revenue_generated": 0.0,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
+    async def _consider_buyback(self, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Decide whether to queue a buyback, and queue it if so.
+
+        The agent does everything except sign: watches, decides, sizes against
+        the operator's own risk and reinvest settings, prices it through Jupiter,
+        and queues it. The operator approves with one click and their wallet
+        signs. Nothing here can move funds.
+        """
+        from revenue.buyback_engine import should_propose, review
+        from buyback import quote as bb_quote
+
+        settings = await self.db.settings.find_one({}) or {}
+
+        last = await self.db.buyback_proposals.find({}).sort("proposed_at", -1) \
+            .limit(1).to_list(1)
+        last_at = None
+        if last:
+            raw = last[0].get("proposed_at")
+            if isinstance(raw, datetime):
+                last_at = raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+
+        # Reference price is the oldest stored observation, so a fall is measured
+        # against something real rather than an assumption.
+        reference = None
+        try:
+            oldest = await self.db.token_measurements.find(
+                {"price_usd": {"$ne": None}}
+            ).sort("ts", 1).limit(1).to_list(1)
+            if oldest:
+                reference = oldest[0].get("price_usd")
+        except Exception:
+            pass
+
+        decision = should_propose(metrics, settings, last_at, reference)
+        if not decision.get("propose"):
+            return decision
+
+        mint = metrics.get("mint")
+        q = await bb_quote(
+            mint, decision["amount_sol"],
+            int(settings.get("slippage_bps") or 50),
+            os.environ.get("JUPITER_API_KEY", ""),
+        )
+        reviewed = review(decision, q)
+        if not reviewed.get("propose"):
+            return reviewed
+
+        await self.db.buyback_proposals.insert_one({
+            "id": str(uuid.uuid4()),
+            "mint": mint,
+            "amount_sol": reviewed["amount_sol"],
+            "price_impact_pct": reviewed.get("price_impact_pct"),
+            "quoted_out_raw": reviewed.get("quoted_out_raw"),
+            "reasons": reviewed.get("reasons", []),
+            "disclosure": reviewed.get("disclosure"),
+            "proposed_by": f"agent:{self.agent_id}",
+            "proposed_at": datetime.now(timezone.utc),
+            "status": "pending",
+            "executed": False,
+            "requires_signature": True,
+        })
+        logger.info(
+            f"{self.agent_id}: queued buyback proposal {reviewed['amount_sol']} SOL "
+            f"at {reviewed.get('price_impact_pct')}% impact"
+        )
+        return reviewed
 
     async def phase_scale(self, measurement: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """SCALE: measure change against the previous stored measurement.

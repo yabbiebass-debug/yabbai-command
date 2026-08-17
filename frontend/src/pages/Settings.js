@@ -19,6 +19,8 @@ const DEFAULT_SETTINGS = {
   self_improve: true,
   alert_price_drop_pct: 20.0,
   alert_balance_low_sol: 0.5,
+  buyback_enabled: false,
+  buyback_drop_pct: 15.0,
   custom_rpc_enabled: false,
   demo_mode: false,
 };
@@ -68,7 +70,7 @@ export default function Settings() {
         console.error('Failed to load settings:', e);
         setLoading(false);
       });
-  }, [API]);
+  }, []);  // API is a module constant; it never changes.
 
   const set = (key, val) => { setCfg(prev => ({ ...prev, [key]: val })); setDirty(true); };
 
@@ -229,6 +231,33 @@ export default function Settings() {
               <ToggleRow label="Self-Improvement Mode" desc="AI refines strategies over time" checked={cfg.self_improve} onChange={e => set('self_improve', e.target.checked)} />
               <ToggleRow label="Auto-Reinvest LP" desc="Automatically reinvest LP yield" checked={cfg.auto_reinvest} onChange={e => set('auto_reinvest', e.target.checked)} />
             </div>
+          </SECTION>
+
+          <SECTION title="🔁 AGENT BUYBACKS">
+            <ToggleRow
+              label="Let agents propose buybacks"
+              desc="Off by default. Agents can only queue; they cannot spend."
+              checked={cfg.buyback_enabled === true}
+              onChange={e => set('buyback_enabled', e.target.checked)}
+            />
+            <Field
+              label="PROPOSE AFTER A FALL OF (%)"
+              hint="Measured against the oldest recorded price, not an assumption"
+            >
+              <input
+                className="field"
+                type="number" step="1" min="1" max="99"
+                value={cfg.buyback_drop_pct}
+                onChange={e => set('buyback_drop_pct', parseFloat(e.target.value))}
+              />
+            </Field>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070', lineHeight: 1.7 }}>
+              Size comes from risk appetite and reinvestment rate above. Every
+              proposal is re-quoted and signed in your own wallet — no key on the
+              server can move the treasury. A buyback spends SOL for tokens, so it
+              shrinks the SOL balance and, on a bonding curve, lifts quoted market
+              cap without outside money arriving.
+            </p>
           </SECTION>
 
           <SECTION title="💳 PAYMENT ENGINE">
