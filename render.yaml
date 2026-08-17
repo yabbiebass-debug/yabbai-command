@@ -1,61 +1,92 @@
 # Render Blueprint for YABBAI.
 #
-# Deploy: Render dashboard -> New -> Blueprint -> point at this repo.
-# Render reads this file and creates all three services.
+# Render dashboard -> Blueprints -> New Blueprint Instance -> point at this repo
+# on branch main. It creates all three services with the settings below.
 #
-# MongoDB is NOT included: Render has no managed MongoDB. Create a free M0 cluster
-# at mongodb.com/atlas, then paste its connection string into MONGO_URL below via
-# the Render dashboard. Allow-list 0.0.0.0/0 in Atlas network access, since Render
-# free instances do not have static egress IPs.
+# MongoDB is not included: Render has no managed MongoDB. Create a free M0
+# cluster at mongodb.com/atlas, allow 0.0.0.0/0 in network access (Render free
+# instances have no static egress IP), and paste the connection string into
+# MONGO_URL in the dashboard.
+#
+# Values marked `sync: false` are prompted for on first deploy and are never
+# committed. Everything else is safe in this file: mint and treasury addresses
+# are public on-chain.
 
 services:
-  # ── Backend API ────────────────────────────────────────────────────────────
+  # == Backend API =============================================================
   - type: web
     name: yabbai-api
     runtime: python
     plan: free
     region: oregon
+    branch: main
     buildCommand: pip install -r backend/requirements.txt
-    # 0.0.0.0 and $PORT are required — Render routes to the port it assigns.
+    # 0.0.0.0 and $PORT are required - Render routes to the port it assigns.
+    # --app-dir puts backend/ on sys.path so `revenue.*` imports resolve.
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT --app-dir backend
     healthCheckPath: /api/
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.10"
-      # Secrets are set in the dashboard, never committed.
+
+      # Secrets - set in the dashboard, never here.
       - key: MONGO_URL
         sync: false
       - key: SOLANA_RPC_URL
         sync: false
       - key: JUPITER_API_KEY
         sync: false
+      # Long random string. Same value goes in Stripe/Gumroad as the signing
+      # secret. Without it, no income can be booked from any source.
+      - key: WEBHOOK_SECRET
+        sync: false
+
       - key: DB_NAME
         value: yabbai
       - key: HUB_AUTH_URL
         value: https://yabbai.network
-      # Makes a fresh deployment self-configuring. Without this the database is
-      # empty on first boot and the public endpoints report configured: false,
-      # since the only way to seed the mint is a director-only route.
+
+      # Makes a fresh deploy self-configuring; the database starts empty and the
+      # route that would seed the mint is director-only.
       - key: TOKEN_MINT
         value: FXzGbxw38xBzTdwRe4YoGBA9toWat4vSVvvAgN5Ljupx
       - key: TREASURY_WALLET
         value: HTN1fvHwbzKiMwh9YXZEe3eooiMdoCAs3TweWdiSZV5i
+
+      # Tried in order when the primary refuses a method on plan grounds.
+      - key: SOLANA_RPC_FALLBACKS
+        value: https://api.mainnet-beta.solana.com,https://solana-rpc.publicnode.com,https://rpc.ankr.com/solana
+
+      # Shares one token measurement across agents for this many seconds.
+      # Uncached, 50 agents rate-limited Jupiter into a false DATA GAP.
+      - key: TOKEN_MEASUREMENT_TTL
+        value: "30"
+
       - key: SNAPSHOT_INTERVAL_SECONDS
         value: "300"
+      - key: WEBHOOK_MAX_AGE_SECONDS
+        value: "300"
+
+      # Never '*' while credentials are allowed.
       - key: CORS_ORIGINS
         value: https://yabbai.network,https://command.yabbai.network,https://token.yabbai.network,https://holders.yabbai.network
 
-  # ── Director command centre ────────────────────────────────────────────────
+  # == Director console ========================================================
   - type: web
     name: yabbai-token
     runtime: static
     plan: free
+    branch: main
     buildCommand: cd frontend && npm install --legacy-peer-deps && npm run build
     staticPublishPath: frontend/build
     envVars:
-      # Absolute API base: this static host cannot serve /api itself.
+      # Must be a .yabbai.network host. The session cookie is scoped to that
+      # parent domain, so pointing this at an onrender.com hostname means the
+      # browser never sends it and every gated call returns 401.
       - key: REACT_APP_BACKEND_URL
-        sync: false
+        value: https://api.yabbai.network
+      # react-scripts treats warnings as errors when CI is true, and Render
+      # sets it.
       - key: CI
         value: "false"
     routes:
@@ -72,19 +103,24 @@ services:
       - path: /*
         name: Referrer-Policy
         value: strict-origin-when-cross-origin
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000; includeSubDomains
 
-  # ── Public holder view ─────────────────────────────────────────────────────
-  # build:holders is what strips admin code from the bundle. Using the default
-  # build command here would publish the full command app to the public URL.
+  # == Public holder view ======================================================
+  # build:holders is the entire isolation. Running the default build here would
+  # publish the full command app - auth, wallet signing and all - to the public
+  # URL. Verified: 226 KB with no admin markers, versus 1091 KB for the console.
   - type: web
     name: yabbai-holders
     runtime: static
     plan: free
+    branch: main
     buildCommand: cd frontend && npm install --legacy-peer-deps && npm run build:holders
     staticPublishPath: frontend/build
     envVars:
       - key: REACT_APP_BACKEND_URL
-        sync: false
+        value: https://api.yabbai.network
       - key: CI
         value: "false"
     routes:
@@ -101,3 +137,6 @@ services:
       - path: /*
         name: Referrer-Policy
         value: strict-origin-when-cross-origin
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000; includeSubDomains
