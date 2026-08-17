@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useToast } from '../context/ToastContext';
+import WalletPanel from '../components/WalletPanel';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -18,6 +19,18 @@ export default function CommandCentre() {
   const [agentStatus, setAgentStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState([]);
+  // Mint for the wallet panel, so a connected wallet's YABBAI balance can be
+  // picked out of its token list.
+  const [tokenMint, setTokenMint] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API}/token-mint`, { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled && d?.configured) setTokenMint(d.mint); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   const canvasRef = useRef(null);
   const neuralRef = useRef(null);
   const frameRef = useRef(0);
@@ -318,6 +331,13 @@ export default function CommandCentre() {
           </div>
         </div>
       )}
+
+      {/* Wallets. Connect Phantom, MetaMask, Solflare or Backpack and read live
+          balances. Connecting shares a public address only; this holds no keys
+          and signs nothing on its own. */}
+      <div className="fade-in-4" style={{ marginBottom: 24 }}>
+        <WalletPanel api={API} mint={tokenMint} />
+      </div>
 
       {/* Live Events Feed */}
       <div className="card fade-in-5" style={{ marginBottom: 24 }}>
