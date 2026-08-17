@@ -2257,9 +2257,31 @@ async def startup_revenue_tracker():
         background_task = asyncio.create_task(live_tracker.start_background_orchestrator())
         logger.info("✅ Live Revenue Tracker started")
 
-        # Start multi-agent pool
-        agent_pool_task = asyncio.create_task(agent_pool.start())
-        logger.info("✅ Multi-Agent Pool started")
+        # Start multi-agent pool — off unless explicitly enabled.
+        #
+        # Measured before this switch existed: 255,000+ agent cycles and 1,072
+        # revenue cycles produced 0 proposed actions, 0 routed actions and $0.
+        # Not a fault — both paths refuse correctly at their first gate. The
+        # buyback path stops at "buyback disabled in settings", and the withdraw
+        # path needs real_income > $25 where real_income counts only verified
+        # payment-processor entries, of which there have been none.
+        #
+        # So the pool spawns agents that check two preconditions, find both
+        # unmet, and exit — continuously, burning CPU to re-derive the same
+        # answer. It becomes useful the moment either precondition changes:
+        # buybacks enabled in Settings, or a real invoice clearing a webhook.
+        #
+        # Default off rather than on. An idle machine is recoverable; a laptop
+        # pinned overnight for nothing is not something you get back.
+        if os.environ.get("AGENTS_ENABLED", "").strip().lower() in ("1", "true", "yes"):
+            agent_pool_task = asyncio.create_task(agent_pool.start())
+            logger.info("✅ Multi-Agent Pool started")
+        else:
+            logger.info(
+                "⏸  Multi-Agent Pool NOT started (AGENTS_ENABLED unset). "
+                "Nothing else is affected — the API, snapshot poller and ledger "
+                "all run normally. Set AGENTS_ENABLED=true to resume."
+            )
 
         # Persist real mainnet observations so performance has history to measure
         snapshot_task = asyncio.create_task(snapshot_poller(SNAPSHOT_INTERVAL))
