@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { detectWallets, connectWallet, disconnectWallet } from '../lib/wallets';
+import { detectWallets, connectWallet, disconnectWallet, signMessage } from '../lib/wallets';
 
 /**
  * Connect Phantom, MetaMask, Solflare or Backpack and show live balances.
@@ -19,6 +19,7 @@ export default function WalletPanel({ api, mint }) {
   const [balances, setBalances] = useState({});
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
+  const [verified, setVerified] = useState({});
 
   useEffect(() => {
     // Extensions register asynchronously; re-scan briefly after mount.
@@ -70,6 +71,48 @@ export default function WalletPanel({ api, mint }) {
   const handleDisconnect = async (wallet) => {
     await disconnectWallet(wallet.entry);
     setConnected((c) => c.filter((w) => w.address !== wallet.address));
+    setVerified((v) => { const n = { ...v }; delete n[wallet.address]; return n; });
+  };
+
+  /**
+   * Prove control of the wallet by signing a server-issued message.
+   *
+   * Signing text is not a transaction: it authorises nothing, moves nothing and
+   * costs nothing. The message carries a single-use nonce and this domain, so
+   * the signature cannot be replayed here or captured by another site.
+   */
+  const handleSign = async (wallet) => {
+    setBusy(wallet.address);
+    setError(null);
+    try {
+      const nonceRes = await fetch(`${api}/wallet/nonce`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: wallet.address }),
+      });
+      if (!nonceRes.ok) throw new Error(`nonce request failed (${nonceRes.status})`);
+      const { message } = await nonceRes.json();
+
+      const signature = await signMessage(wallet.entry, message);
+
+      const verifyRes = await fetch(`${api}/wallet/verify`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address: wallet.address, message, signature, label: wallet.name,
+        }),
+      });
+      if (!verifyRes.ok) {
+        const body = await verifyRes.json().catch(() => ({}));
+        throw new Error(body.detail || `verification failed (${verifyRes.status})`);
+      }
+      setVerified((v) => ({ ...v, [wallet.address]: true }));
+    } catch (e) {
+      setError(`${wallet.name}: ${e.message}`);
+    }
+    setBusy(null);
   };
 
   const short = (a) => `${a.slice(0, 4)}…${a.slice(-4)}`;
@@ -140,9 +183,25 @@ export default function WalletPanel({ api, mint }) {
                   {short(w.address)} ↗
                 </a>
               </div>
-              <button className="btn btn-outline btn-sm" onClick={() => handleDisconnect(w)}>
-                Disconnect
-              </button>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                {verified[w.address] ? (
+                  <span className="badge badge-green" style={{ alignSelf: 'center' }}>
+                    VERIFIED
+                  </span>
+                ) : (
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => handleSign(w)}
+                    disabled={busy === w.address}
+                    title="Sign a message to prove you control this wallet. No transaction, no funds moved."
+                  >
+                    {busy === w.address ? 'Signing…' : 'Sign in'}
+                  </button>
+                )}
+                <button className="btn btn-outline btn-sm" onClick={() => handleDisconnect(w)}>
+                  Disconnect
+                </button>
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: 20, marginTop: 8 }}>

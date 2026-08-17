@@ -100,6 +100,46 @@ export async function connectWallet(entry) {
   return { name: entry.name, address: key.toString() };
 }
 
+/**
+ * Sign a message to prove control of the wallet.
+ *
+ * This is a signature over text, not a transaction. It authorises nothing, moves
+ * nothing and costs nothing — a wallet cannot be drained by signing here. The
+ * message is issued by the server and carries a single-use nonce and the domain,
+ * so a signature cannot be replayed or captured by another site and reused.
+ */
+export async function signMessage(entry, message) {
+  const bytes = new TextEncoder().encode(message);
+
+  if (entry?.standard) {
+    const feature = entry.standard.features?.['solana:signMessage'];
+    if (!feature?.signMessage) {
+      throw new Error(`${entry.name} cannot sign messages`);
+    }
+    const account = entry.standard.accounts?.[0];
+    if (!account) throw new Error(`${entry.name} is not connected`);
+    const [result] = await feature.signMessage({ account, message: bytes });
+    if (!result?.signature) throw new Error('wallet returned no signature');
+    return toBase64(result.signature);
+  }
+
+  const provider = entry?.provider;
+  if (!provider?.signMessage) {
+    throw new Error(`${entry?.name || 'wallet'} cannot sign messages`);
+  }
+  const res = await provider.signMessage(bytes, 'utf8');
+  const sig = res?.signature || res;
+  if (!sig) throw new Error('wallet returned no signature');
+  return toBase64(sig);
+}
+
+function toBase64(bytes) {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = '';
+  arr.forEach((b) => { binary += String.fromCharCode(b); });
+  return window.btoa(binary);
+}
+
 export async function disconnectWallet(entry) {
   try {
     if (entry?.standard) {
