@@ -2209,11 +2209,14 @@ app.include_router(api_router)
 # requests, so the origin list must never be '*' in production — a wildcard with
 # credentials lets any site on the internet make authenticated calls on behalf of a
 # logged-in Director. Default to the known hosts rather than to '*'.
+# The deployed hosts, and nothing else. command.yabbai.network was the console's
+# address under the previous host and no longer serves anything; an origin kept
+# here after the service behind it is gone is a credentialed entry point pointed
+# at a name nobody is watching.
 _DEFAULT_ORIGINS = ",".join([
-    "https://yabbai.network",
-    "https://command.yabbai.network",
-    "https://token.yabbai.network",
-    "https://holders.yabbai.network",
+    "https://yabbai.network",         # hub, issues the session
+    "https://token.yabbai.network",   # director console (yabbai-token)
+    "https://holders.yabbai.network", # public view (yabbai-holders)
 ])
 _cors_origins = [
     o.strip()
