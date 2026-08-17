@@ -792,6 +792,191 @@ async def ai_ask(request: Request, user: dict = Depends(require_director)):
     }
 
 
+@api_router.get("/wallets")
+async def get_wallets(user: dict = Depends(require_director)):
+    """Live SOL and token balances for every configured wallet.
+
+    Reads whatever addresses are configured, in one pass, from chain. There is no
+    MetaMask entry: MetaMask is an Ethereum wallet and holds no SOL or SPL
+    tokens, so labelling a Solana address as one would be wrong on the page. Any
+    Solana address can be added under `extra_wallets` and it is read the same way.
+
+    Read-only. This holds no keys and cannot move anything; spending still
+    requires the operator's own wallet to sign, to an allowlisted destination.
+    """
+    settings = await db.settings.find_one({}) or {}
+    mint = await _configured_mint()
+
+    wallets = []
+    treasury = await _configured_treasury()
+    if treasury:
+        wallets.append({"label": "Treasury", "address": treasury, "role": "treasury"})
+
+    main = (os.environ.get("MAIN_WALLET") or settings.get("main_wallet") or "").strip()
+    if main and is_valid_base58(main):
+        wallets.append({"label": "Main", "address": main, "role": "main"})
+
+    # Comma-separated "Label:Address" pairs, or bare addresses.
+    for entry in (os.environ.get("EXTRA_WALLETS") or settings.get("extra_wallets") or "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        label, _, addr = entry.rpartition(":")
+        addr = addr.strip()
+        if is_valid_base58(addr):
+            wallets.append({
+                "label": (label.strip() or addr[:4] + "..." + addr[-4:]),
+                "address": addr,
+                "role": "extra",
+            })
+
+    if not wallets:
+        return {
+            "ok": True,
+            "wallets": [],
+            "detail": "No wallets configured. Set treasury_wallet or main_wallet "
+                      "in Settings, or EXTRA_WALLETS as Label:Address pairs.",
+        }
+
+    chain = SolanaLive(SOLANA_RPC, fallbacks=SOLANA_FALLBACKS)
+    price = await live_jupiter_price(mint, os.environ.get("JUPITER_API_KEY", "")) if mint else None
+
+    states = await asyncio.gather(
+        *[chain.treasury_state(w["address"], mint) for w in wallets],
+        return_exceptions=True,
+    )
+
+    out = []
+    for w, state in zip(wallets, states):
+        if isinstance(state, Exception):
+            out.append({**w, "sol": None, "token_balance": None,
+                        "error": str(state)[:120]})
+            continue
+        token_balance = state.get("token_balance")
+        out.append({
+            **w,
+            "sol": state.get("sol"),
+            "token_balance": token_balance,
+            "token_value_usd": token_balance * price
+            if price is not None and token_balance is not None else None,
+            "explorer": f"https://solscan.io/account/{w['address']}",
+        })
+
+    total_sol = sum(w["sol"] for w in out if isinstance(w.get("sol"), (int, float)))
+    total_tokens = sum(
+        w["token_balance"] for w in out
+        if isinstance(w.get("token_balance"), (int, float))
+    )
+
+    return {
+        "ok": True,
+        "mint": mint,
+        "price_usd": price,
+        "wallets": out,
+        "totals": {
+            "sol": round(total_sol, 9),
+            "token_balance": total_tokens,
+            "token_value_usd": total_tokens * price if price is not None else None,
+            # Only wallets that answered are summed; a failed read is excluded
+            # rather than counted as zero.
+            "wallets_read": sum(1 for w in out if w.get("sol") is not None),
+            "wallets_total": len(out),
+        },
+        "fetched_at": utcnow(),
+    }
+
+
+@api_router.get("/yield")
+async def get_yield(window_days: int = Query(30, ge=1, le=365),
+                    user: dict = Depends(require_director)):
+    """Everything that constitutes yield for this token, measured.
+
+    Four separate things get conflated as "yield", so this reports them apart:
+
+      treasury_performance  realised change with external flows backed out.
+                            Depositing SOL is not a gain.
+      treasury_now          current composition. A position, not a profit.
+      booked_revenue        reconciled payment-processor income from the truth
+                            ledger. The only figure that is actually income.
+      token_trend           measured movement in price, holders and volume from
+                            the agents' stored measurements.
+
+    Anything without enough history returns available:false with a reason rather
+    than a zero, because zero and unknown are different claims.
+    """
+    perf = await treasury_performance(db, window_days=window_days)
+    booked = await ledger_totals(db)
+
+    # Current treasury composition, read live.
+    mint = await _configured_mint()
+    treasury_addr = await _configured_treasury()
+    chain = SolanaLive(SOLANA_RPC, fallbacks=SOLANA_FALLBACKS)
+    state = await chain.treasury_state(treasury_addr, mint) if mint else {}
+    price = await live_jupiter_price(mint, os.environ.get("JUPITER_API_KEY", "")) if mint else None
+
+    token_value_usd = None
+    if price is not None and state.get("token_balance") is not None:
+        token_value_usd = state["token_balance"] * price
+
+    # Token movement across stored agent measurements.
+    trend: Dict[str, Any] = {"available": False, "reason": "insufficient_measurements"}
+    try:
+        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        rows = await db.token_measurements.find(
+            {"ts": {"$gte": since}}
+        ).sort("ts", 1).to_list(2000)
+        if len(rows) >= 2:
+            first, last = rows[0], rows[-1]
+
+            def delta(field):
+                a, b = first.get(field), last.get(field)
+                if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                    return {
+                        "from": a, "to": b, "delta": round(b - a, 10),
+                        "pct": round((b - a) / a * 100, 4) if a else None,
+                    }
+                return None
+
+            trend = {
+                "available": True,
+                "measurements": len(rows),
+                "from": first.get("ts").isoformat() if hasattr(first.get("ts"), "isoformat") else None,
+                "to": last.get("ts").isoformat() if hasattr(last.get("ts"), "isoformat") else None,
+                "price_usd": delta("price_usd"),
+                "holders": delta("holders"),
+                "treasury_sol": delta("treasury_sol"),
+                "treasury_token_balance": delta("treasury_token_balance"),
+                "volume_24h_usd": delta("volume_24h_usd"),
+            }
+        else:
+            trend["measurements"] = len(rows)
+    except Exception as e:
+        trend = {"available": False, "reason": "error", "detail": str(e)[:160]}
+
+    return {
+        "ok": True,
+        "window_days": window_days,
+        "treasury_performance": perf,
+        "treasury_now": {
+            "address": treasury_addr,
+            "sol": state.get("sol"),
+            "token_balance": state.get("token_balance"),
+            "token_value_usd": token_value_usd,
+            "note": "Holdings are a position. Value moving is not income.",
+        },
+        "booked_revenue": {
+            **booked,
+            "note": (
+                "Reconciled payment-processor income only. Stays at zero until a "
+                "verified webhook books a real sale; a rising token price is not "
+                "revenue."
+            ),
+        },
+        "token_trend": trend,
+        "fetched_at": utcnow(),
+    }
+
+
 @api_router.get("/performance")
 async def get_performance(window_days: int = Query(30, ge=1, le=365),
                           user: dict = Depends(require_director)):
