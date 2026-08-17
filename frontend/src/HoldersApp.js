@@ -1,5 +1,6 @@
 import React from 'react';
 import Holders from './pages/Holders';
+import JoinPanel from './components/JoinPanel';
 import FaucetClaim from './components/FaucetClaim';
 import './index.css';
 
@@ -27,9 +28,14 @@ import './index.css';
  * cookie still never reaches this origin.
  */
 export default function HoldersApp() {
+  // JoinPanel sits directly under the statistics, deliberately. A visitor reads
+  // holder count and concentration first and the buy link second — the ordering
+  // is the honesty. Reversing it would make this a funnel with data attached
+  // rather than data with a next step.
   return (
     <>
       <Holders />
+      <JoinPanel />
       <FaucetClaim />
     </>
   );
