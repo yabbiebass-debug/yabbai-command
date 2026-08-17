@@ -30,30 +30,72 @@ const SOLANA_CHAINS = ['solana:mainnet', 'solana:mainnet-beta'];
 const _registry = new Map();
 let _listening = false;
 
+function addWallet(wallet) {
+  if (!wallet?.name) return;
+  const chains = wallet.chains || [];
+  // Some builds report chains only after connecting, so accept a wallet that
+  // exposes Solana features even when its chain list is still empty.
+  const solanaish =
+    chains.some((c) => String(c).startsWith('solana:')) ||
+    Object.keys(wallet.features || {}).some((f) => f.startsWith('solana:'));
+  if (solanaish) _registry.set(wallet.name, wallet);
+}
+
+/**
+ * The object the Wallet Standard requires an app to publish.
+ *
+ * This is the part that was missing and it broke every extension on the page.
+ * The app-ready event MUST be a CustomEvent whose `detail` is this API, because
+ * extensions destructure it on arrival:
+ *
+ *     ({ register }) => register(theirWallet)
+ *
+ * Dispatching a bare `new Event(...)` leaves `detail` undefined, so that
+ * destructure throws inside the extension's own injected script — which is why
+ * the console filled with "Cannot destructure property 'register' of
+ * 'undefined'" traced to solana.js, inpage.js and injected.js rather than to
+ * anything in this file. Each extension threw, registered nothing, and wallet
+ * detection silently found zero wallets.
+ */
+function standardApi() {
+  return {
+    register: (...wallets) => {
+      wallets.forEach(addWallet);
+      return () => {}; // unregister handle; nothing to tear down here
+    },
+  };
+}
+
 function startListening() {
   if (_listening || typeof window === 'undefined') return;
   _listening = true;
-  const register = (event) => {
-    const wallet = event?.detail?.wallet || event?.detail;
-    if (!wallet?.name) return;
-    const chains = wallet.chains || [];
-    // Some builds report chains only after connecting, so accept a wallet that
-    // exposes Solana features even when its chain list is still empty.
-    const solanaish =
-      chains.some((c) => String(c).startsWith('solana:')) ||
-      Object.keys(wallet.features || {}).some((f) => f.startsWith('solana:'));
-    if (solanaish) _registry.set(wallet.name, wallet);
-  };
+
+  const api = standardApi();
+
   try {
-    window.addEventListener(STANDARD_EVENT, register);
-    // Wallets already registered re-announce when the app declares itself ready.
-    window.dispatchEvent(new Event(APP_READY));
-    // Some extensions inject late; ask again a few times.
-    [150, 600, 1500, 3000].forEach((ms) =>
-      setTimeout(() => {
-        try { window.dispatchEvent(new Event(APP_READY)); } catch { /* ignore */ }
-      }, ms)
-    );
+    window.addEventListener(STANDARD_EVENT, (event) => {
+      const detail = event?.detail;
+      // Spec shape: detail is a callback the wallet wants handed the API.
+      if (typeof detail === 'function') {
+        try { detail(api); } catch { /* one bad extension must not stop others */ }
+        return;
+      }
+      // Older builds pass the wallet object straight through.
+      addWallet(detail?.wallet || detail);
+    });
+
+    const announce = () => {
+      try {
+        window.dispatchEvent(new CustomEvent(APP_READY, { detail: api }));
+      } catch { /* ignore */ }
+    };
+
+    // Wallets already present re-announce when the app declares itself ready.
+    announce();
+    // Some extensions inject late; ask again a few times, then stop. This is
+    // bounded deliberately — an unbounded poll re-runs every extension's
+    // registration handler forever.
+    [150, 600, 1500, 3000].forEach((ms) => setTimeout(announce, ms));
   } catch {
     /* registry unavailable; globals below still apply */
   }
