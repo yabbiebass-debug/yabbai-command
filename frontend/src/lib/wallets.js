@@ -83,6 +83,10 @@ function legacyProviders() {
   // via the registry. These are direct handles some builds also expose.
   push('MetaMask', window.metamask?.solana || window.ethereum?.solana || null);
 
+  // Jupiter's browser extension. It registers via the Wallet Standard like the
+  // others; this is the direct handle as a fallback.
+  push('Jupiter', window.jupiter?.solana || window.Jupiter?.solana || null);
+
   // A generic provider that is not one of the above.
   if (window.solana && !window.solana.isPhantom && !out.some((p) => p.provider === window.solana)) {
     push(window.solana.isSolflare ? 'Solflare' : 'Solana Wallet', window.solana);

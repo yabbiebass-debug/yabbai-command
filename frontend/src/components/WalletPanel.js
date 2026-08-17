@@ -129,13 +129,10 @@ export default function WalletPanel({ api, mint }) {
 
       {available.length === 0 && (
         <div style={{ fontSize: 12, color: '#8fa3bf', lineHeight: 1.6 }}>
-          No Solana wallet detected yet. Phantom, MetaMask, Solflare and Backpack
-          all work. If one is installed, unlock it and reload — extensions
-          register a few seconds after page load and a locked wallet stays hidden.
-          <div style={{ marginTop: 8, color: '#3a5070' }}>
-            Jupiter is not listed because it is not a wallet: it is a swap
-            aggregator that uses whichever wallet you connect here.
-          </div>
+          No Solana wallet detected yet. Jupiter, Phantom, MetaMask, Solflare and
+          Backpack all work. If one is installed, unlock it and reload —
+          extensions register a few seconds after page load, and a locked wallet
+          stays hidden until it is opened.
         </div>
       )}
 
