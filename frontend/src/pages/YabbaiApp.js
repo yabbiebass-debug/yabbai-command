@@ -78,6 +78,11 @@ export default function YabbaiApp() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [agentPool, setAgentPool] = useState(null);
+  const [yieldData, setYieldData] = useState(null);
+  const [settingsDoc, setSettingsDoc] = useState(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [configSaved, setConfigSaved] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const mintRef = useRef(null);
 
   // Load token mint config
@@ -117,13 +122,21 @@ export default function YabbaiApp() {
           return r.json();
         })
         .then(data => {
-          if (data && data.length > 0) {
-            setPriceHistory(data);
-            // Set current price to latest from history
-            setPrice(data[data.length - 1]?.price || null);
+          // The endpoint returns { ok, points: [...] }, not a bare array. This
+          // checked data.length, which is undefined on an object, so the guard
+          // never passed and the chart sat on "Loading price history..." forever
+          // even when points were available.
+          const points = Array.isArray(data) ? data : (data?.points || []);
+          if (points.length > 0) {
+            setPriceHistory(points);
+            setPrice(points[points.length - 1]?.price ?? null);
           }
+          setHistoryLoaded(true);
         })
-        .catch((e) => console.error('Price history fetch failed:', e));
+        .catch((e) => {
+          console.error('Price history fetch failed:', e);
+          setHistoryLoaded(true);
+        });
     };
 
     loadPriceHistory();
@@ -180,6 +193,81 @@ export default function YabbaiApp() {
     const id = setInterval(load, 15000);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
+
+  // Measured yield. Reports treasury performance, current holdings, booked
+  // revenue and token movement as four separate things, because conflating them
+  // is how a position gets presented as a profit.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch(`${API}/yield?window_days=30`, { credentials: 'include' })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => { if (!cancelled && d?.ok) setYieldData(d); })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  // These sliders were local state only: never loaded, never saved, connected to
+  // nothing. The backend has had autonomy_level, risk_appetite, reinvest_rate,
+  // self_improve and auto_reinvest in settings the whole time, and the agents
+  // read them. Load the real values so the controls show actual configuration.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API}/settings`, { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (cancelled || !d) return;
+        setAiConfig({
+          autonomy: d.autonomy_level ?? 75,
+          risk: d.risk_appetite ?? 40,
+          reinvest: d.reinvest_rate ?? 60,
+        });
+        setToggles({
+          selfImprove: d.self_improve ?? true,
+          autoReinvest: d.auto_reinvest ?? true,
+        });
+        setSettingsDoc(d);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const saveAiConfig = async (nextConfig, nextToggles) => {
+    if (!settingsDoc) {
+      toastError('Settings not loaded yet');
+      return;
+    }
+    setSavingConfig(true);
+    try {
+      // Send the whole document back: the endpoint replaces rather than patches,
+      // so posting only the changed keys would blank everything else.
+      const body = {
+        ...settingsDoc,
+        autonomy_level: nextConfig.autonomy,
+        risk_appetite: nextConfig.risk,
+        reinvest_rate: nextConfig.reinvest,
+        self_improve: nextToggles.selfImprove,
+        auto_reinvest: nextToggles.autoReinvest,
+      };
+      delete body.updated_at;
+      const res = await fetch(`${API}/settings`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setSettingsDoc(await res.json());
+      setConfigSaved(true);
+      setTimeout(() => setConfigSaved(false), 2500);
+    } catch (e) {
+      toastError(`Could not save configuration: ${e.message}`);
+    }
+    setSavingConfig(false);
+  };
 
   const handleSweep = async () => {
     if (!mintCfg?.configured) {
@@ -439,9 +527,24 @@ export default function YabbaiApp() {
               connected wallet, a live route quote and signing, none of which this
               page does. Rather than fake it, hand off to Jupiter, which performs
               the actual swap with real routing and real slippage. */}
+          {/* Built from live state, not hardcoded: direction follows the toggle,
+              the mint comes from token config, the amount from the input, and
+              slippage from the configured slippage_bps rather than a fixed
+              value. Change any of them here and the Jupiter link changes with it. */}
           <a
             href={mintCfg?.configured
-              ? `https://jup.ag/swap/USDC-${mintCfg.mint}${swapAmt ? `?inAmount=${swapAmt}` : ''}`
+              ? (() => {
+                  const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+                  const inMint = swapFrom === 'USDC' ? USDC_MINT : mintCfg.mint;
+                  const outMint = swapFrom === 'USDC' ? mintCfg.mint : USDC_MINT;
+                  const params = new URLSearchParams();
+                  if (swapAmt && parseFloat(swapAmt) > 0) params.set('inAmount', swapAmt);
+                  // Prefer the saved setting; fall back to the on-screen choice.
+                  const bps = settingsDoc?.slippage_bps ?? Math.round(slippage * 100);
+                  if (bps) params.set('slippageBps', String(bps));
+                  const qs = params.toString();
+                  return `https://jup.ag/swap/${inMint}-${outMint}${qs ? `?${qs}` : ''}`;
+                })()
               : undefined}
             target="_blank"
             rel="noopener noreferrer"
@@ -493,18 +596,82 @@ export default function YabbaiApp() {
             collects a fee, so the pool reports $0.00 revenue by design.
           </p>
           <div className="divider" />
-          {/* Note: Yield tracking would come from real revenue backend integration */}
-          <div style={{ textAlign: 'center' }}>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070', marginBottom: 12 }}>
-              Connect revenue streams in Settings to track yields
+          {/* Was a permanently disabled button labelled "Configure Revenue
+              System". Four different things get called yield, so they are
+              reported apart: a position is not a profit, and a rising price is
+              not income. */}
+          <div>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: 1, color: '#3a5070', marginBottom: 12 }}>
+              YIELD &mdash; MEASURED
             </p>
-            <button
-              className="btn btn-outline"
-              style={{ width: '100%', fontSize: 13, padding: '14px' }}
-              disabled={true}
-            >
-              ⚡ YIELD TRACKING (Configure Revenue System)
-            </button>
+
+            {!yieldData ? (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#3a5070' }}>
+                Reading treasury and ledger...
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: 14 }}>
+                  <div>
+                    <div style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 900, color: '#14F195' }}>
+                      {yieldData.treasury_now?.sol != null
+                        ? `${yieldData.treasury_now.sol.toFixed(4)} SOL` : 'DATA GAP'}
+                    </div>
+                    <div className="stat-label">TREASURY SOL</div>
+                  </div>
+                  <div>
+                    <div style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 900, color: '#9945FF' }}>
+                      {yieldData.treasury_now?.token_value_usd != null
+                        ? `$${yieldData.treasury_now.token_value_usd.toFixed(2)}` : 'DATA GAP'}
+                    </div>
+                    <div className="stat-label">TOKEN HOLDINGS</div>
+                  </div>
+                  <div>
+                    <div style={{
+                      fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 900,
+                      color: yieldData.booked_revenue?.real_income ? '#14F195' : '#3a5070',
+                    }}>
+                      {yieldData.booked_revenue?.real_income != null
+                        ? `$${yieldData.booked_revenue.real_income.toFixed(2)}` : 'DATA GAP'}
+                    </div>
+                    <div className="stat-label">BOOKED REVENUE</div>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 11, color: '#8fa3bf', lineHeight: 1.6 }}>
+                  {yieldData.treasury_performance?.available ? (
+                    <>
+                      Realised treasury performance{' '}
+                      <span style={{ fontFamily: 'var(--font-mono)', color: yieldData.treasury_performance.period_return_pct >= 0 ? '#14F195' : '#ff6060' }}>
+                        {yieldData.treasury_performance.period_return_pct >= 0 ? '+' : ''}
+                        {yieldData.treasury_performance.period_return_pct}%
+                      </span>{' '}
+                      over {yieldData.treasury_performance.elapsed_days}d, with{' '}
+                      {yieldData.treasury_performance.net_flows_sol} SOL of deposits and
+                      withdrawals backed out.
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontFamily: 'var(--font-mono)', color: '#F5A623' }}>DATA GAP</span>
+                      {' - '}{yieldData.treasury_performance?.detail
+                        || 'not enough treasury history to measure a return yet.'}
+                    </>
+                  )}
+                </div>
+
+                <div style={{ fontSize: 11, color: '#8fa3bf', lineHeight: 1.6 }}>
+                  Booked revenue counts reconciled payment-processor income only. It
+                  stays at $0.00 until a verified webhook books a real sale - token
+                  holdings rising in value is a position, not income.
+                </div>
+
+                {yieldData.token_trend?.available && (
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: '#3a5070' }}>
+                    {yieldData.token_trend.measurements} agent measurements in window
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
