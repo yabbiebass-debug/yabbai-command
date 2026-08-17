@@ -866,6 +866,64 @@ async def wallet_verified(user: dict = Depends(require_director)):
     return {"ok": True, "wallets": docs, "count": len(docs)}
 
 
+@api_router.post("/buyback/quote")
+@limiter.limit("30/minute")
+async def buyback_quote(request: Request, user: dict = Depends(require_director)):
+    """Price a treasury buyback and state what it would achieve.
+
+    Quotes and proposes; it does not execute. Executing needs a signature, a
+    signature needs a key, and a key on this server is what allowed the sweep
+    that prompted this rebuild. Sign in your own wallet or use the Jupiter link.
+    """
+    from buyback import quote as bb_quote, plan as bb_plan
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    mint = await _configured_mint()
+    if not mint:
+        raise HTTPException(400, "no token mint configured")
+
+    treasury_addr = await _configured_treasury()
+    settings = await db.settings.find_one({}) or {}
+    slippage_bps = int(body.get("slippage_bps") or settings.get("slippage_bps") or 50)
+
+    chain = SolanaLive(SOLANA_RPC, fallbacks=SOLANA_FALLBACKS)
+    state = await chain.treasury_state(treasury_addr, mint)
+    treasury_sol = state.get("sol")
+
+    # Default to spending most of what is spendable, leaving the fee reserve.
+    from buyback import FEE_RESERVE_SOL
+    requested = body.get("amount_sol")
+    if requested is None:
+        requested = max(0.0, (treasury_sol or 0.0) - FEE_RESERVE_SOL)
+    amount_sol = float(requested)
+
+    supply = await chain.token_supply(mint)
+    decimals = (supply or {}).get("decimals", 6)
+
+    q = await bb_quote(mint, amount_sol, slippage_bps,
+                       os.environ.get("JUPITER_API_KEY", "")) if amount_sol > 0 else None
+
+    price = await live_jupiter_price(mint, os.environ.get("JUPITER_API_KEY", ""))
+    sol_price = await live_jupiter_price(SOL_MINT, os.environ.get("JUPITER_API_KEY", ""))
+    mcap = (supply["supply"] * price) if supply and price is not None else None
+    grad = grad_assess(mcap, sol_price)
+
+    result = bb_plan(treasury_sol, q, decimals, amount_sol, grad)
+
+    # Deep link so the operator can execute in Jupiter with the same parameters.
+    if result.get("available"):
+        result["jupiter_url"] = (
+            f"https://jup.ag/swap/{SOL_MINT}-{mint}"
+            f"?inAmount={amount_sol}&slippageBps={slippage_bps}"
+        )
+    return {"ok": True, "mint": mint, "treasury": treasury_addr, **result}
+
+
 @api_router.get("/wallets")
 async def get_wallets(user: dict = Depends(require_director)):
     """Live SOL and token balances for every configured wallet.
