@@ -34,3 +34,9 @@ typer>=0.9.0
 # installing outside the Emergent platform. Re-enable only alongside the index that
 # actually serves it.
 httpx==0.28.1
+
+# Durable workflows. Needed by backend/workflows/worker.py, not by the API - the
+# API neither imports nor starts it. Listed here anyway so one pip install sets
+# up both; if the Render API service's build time ever matters, split this into
+# requirements-worker.txt rather than dropping it.
+temporalio>=1.7.0
