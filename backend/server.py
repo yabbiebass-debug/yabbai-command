@@ -792,6 +792,67 @@ async def ai_ask(request: Request, user: dict = Depends(require_director)):
     }
 
 
+@api_router.post("/wallet/nonce")
+@limiter.limit("30/minute")
+async def wallet_nonce(request: Request, user: dict = Depends(require_director)):
+    """Issue a single-use nonce and the exact text for the wallet to sign."""
+    from wallet_auth import issue_nonce
+    data = {}
+    try:
+        data = await request.json()
+    except Exception:
+        pass
+    address = (data.get("address") or "").strip() or None
+    if address and not is_valid_base58(address):
+        raise HTTPException(400, "address is not valid base58")
+    return {"ok": True, **issue_nonce(address)}
+
+
+@api_router.post("/wallet/verify")
+@limiter.limit("30/minute")
+async def wallet_verify(request: Request, user: dict = Depends(require_director)):
+    """Verify a signed message and record the wallet as proven.
+
+    Signing proves control of the wallet. It authorises no transaction and moves
+    no funds - it is an ed25519 signature over text this server issued. Director
+    access is still hub SSO; this is a separate, narrower claim.
+    """
+    from wallet_auth import verify
+
+    data = await request.json()
+    address = (data.get("address") or "").strip()
+    message = data.get("message") or ""
+    signature = data.get("signature") or ""
+
+    if not address or not message or not signature:
+        raise HTTPException(400, "address, message and signature are required")
+
+    ok, reason = verify(address, message, signature)
+    if not ok:
+        logger.warning(f"wallet verification failed for {address[:8]}...: {reason}")
+        raise HTTPException(401, f"verification failed: {reason}")
+
+    await db.verified_wallets.update_one(
+        {"address": address},
+        {"$set": {
+            "address": address,
+            "label": (data.get("label") or "").strip()[:40] or None,
+            "verified_at": utcnow(),
+            "verified_by": (user or {}).get("email"),
+        }},
+        upsert=True,
+    )
+    logger.info(f"wallet verified: {address[:8]}...")
+    return {"ok": True, "address": address, "verified": True, "detail": reason}
+
+
+@api_router.get("/wallet/verified")
+async def wallet_verified(user: dict = Depends(require_director)):
+    """Wallets that have proven control by signing."""
+    docs = await db.verified_wallets.find({}, {"_id": 0}).to_list(50)
+    return {"ok": True, "wallets": docs, "count": len(docs)}
+
+
 @api_router.get("/wallets")
 async def get_wallets(user: dict = Depends(require_director)):
     """Live SOL and token balances for every configured wallet.
