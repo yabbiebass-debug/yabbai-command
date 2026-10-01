@@ -746,7 +746,17 @@ async def public_price_history(request: Request, limit: int = Query(100, le=500)
     mint = await _configured_mint()
     if not mint:
         return {"ok": False, "configured": False, "points": []}
-    docs = await db.price_history.find({"mint": mint}).sort("ts", 1).to_list(limit)
+    try:
+        docs = await db.price_history.find({"mint": mint}).sort("ts", 1).to_list(limit)
+    except Exception as exc:
+        logger.warning("public price history unavailable: %s", type(exc).__name__)
+        return {
+            "ok": False,
+            "mint": mint,
+            "points": [],
+            "data_gaps": ["price_history"],
+            "reason": "price history store unreachable",
+        }
     return {
         "ok": True,
         "mint": mint,

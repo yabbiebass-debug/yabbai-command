@@ -103,17 +103,27 @@ export default function Holders() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    try {
-      const [s, h] = await Promise.all([
-        fetch(`${API}/public/token`, PUBLIC_FETCH).then(r => r.json()),
-        fetch(`${API}/public/price-history?limit=200`, PUBLIC_FETCH).then(r => r.json()),
-      ]);
-      setStats(s);
-      setHistory(Array.isArray(h.points) ? h.points : []);
+    // Settled independently: price history is secondary, and its failure must not
+    // discard live chain stats that were read successfully.
+    const [s, h] = await Promise.allSettled([
+      fetch(`${API}/public/token`, PUBLIC_FETCH).then(r => {
+        if (!r.ok) throw new Error(`token ${r.status}`);
+        return r.json();
+      }),
+      fetch(`${API}/public/price-history?limit=200`, PUBLIC_FETCH).then(r => {
+        if (!r.ok) throw new Error(`history ${r.status}`);
+        return r.json();
+      }),
+    ]);
+    if (s.status === 'fulfilled') {
+      setStats(s.value);
       setError(null);
-    } catch (e) {
+    } else {
       setError('Unable to reach the token API.');
     }
+    setHistory(
+      h.status === 'fulfilled' && Array.isArray(h.value.points) ? h.value.points : [],
+    );
     setLoading(false);
   }, []);
 
